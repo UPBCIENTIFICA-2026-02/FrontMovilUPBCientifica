@@ -1,0 +1,56 @@
+# ============================================================
+#  .gitignore — Cliente Móvil UPB-CIENTÍFICA (Android/Kotlin)
+# ============================================================
+
+# --- Gradle ---
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+gradle-app.setting
+.gradletasknamecache
+
+# --- Archivos de build / binarios ---
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+release/
+
+# --- Configuración local del entorno (¡nunca versionar!) ---
+# Contiene rutas absolutas del SDK propias de cada máquina.
+local.properties
+
+# --- Android Studio / IntelliJ ---
+# Se ignoran porque cada dev usa su propio IDE (aquí se usa VSCode).
+.idea/
+*.iml
+.navigation/
+captures/
+
+# --- VSCode ---
+# Se versiona solo lo compartible; el resto es config personal.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# --- Logs y temporales ---
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# --- Node.js (mock del Authentication Service) ---
+mock-auth-server/node_modules/
+mock-auth-server/npm-debug.log*
+mock-auth-server/.env
+
+# --- Keystores y secretos (NUNCA subir al repositorio) ---
+*.jks
+*.keystore
+keystore.properties
+secrets.properties
+
+# --- Salidas de gRPC / protobuf (se regeneran desde el .proto) ---
+# Cuando se reactive File Sync, los stubs generados no se versionan.
+app/build/generated/

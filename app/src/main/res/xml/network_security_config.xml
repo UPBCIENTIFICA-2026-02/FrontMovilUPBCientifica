@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Configuración de seguridad de red — SOLO PARA DESARROLLO.
+    Permite tráfico HTTP sin cifrar (cleartext) hacia el mock local y los
+    servidores del laboratorio mientras se desarrolla.
+
+    >>> IMPORTANTE ANTES DE PRODUCCIÓN <
+    El roadmap exige TLS/cifrado en producción. Antes de entregar/desplegar:
+    - Quitar estas direcciones o poner cleartextTrafficPermitted="false".
+    - Los servicios reales del CCA deben exponerse por HTTPS.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Emulador viendo el localhost de tu PC (donde corre el mock) -->
+        <domain includeSubdomains="true">192.168.20.31</domain>
+
+        <!-- TODO: agregar aquí las IPs reales de los servidores del laboratorio
+            cuando el equipo los tenga corriendo, por ejemplo: -->
+        <!-- <domain includeSubdomains="true">192.168.1.100</domain> -->
+    </domain-config>
+</network-security-config>
