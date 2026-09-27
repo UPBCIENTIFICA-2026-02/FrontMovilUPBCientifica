@@ -31,7 +31,7 @@ object Configuracion {
     }
 
     /** <<< CAMBIA ESTO según dónde estés ejecutando la app. */
-    val entorno: Entorno = Entorno.EMULADOR
+    val entorno: Entorno = Entorno.DISPOSITIVO_FISICO
 
     /**
      * IP de tu PC en la red Wi-Fi, para cuando pruebas en un celular físico.

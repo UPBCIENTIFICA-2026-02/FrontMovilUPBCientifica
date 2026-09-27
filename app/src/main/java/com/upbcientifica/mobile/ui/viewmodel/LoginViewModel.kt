@@ -26,8 +26,25 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
             _state.value = try {
                 UiState.Success(authRepository.login(usuario, contrasena))
             } catch (e: Exception) {
-                UiState.Error(e.message ?: "Error al iniciar sesión")
+                android.util.Log.e("LoginViewModel", "Fallo al iniciar sesion", e)
+                UiState.Error(describir(e))
             }
         }
+    }
+
+    /**
+     * Mensaje que sirva para diagnosticar algo.
+     *
+     * Antes era `e.message ?: "Error al iniciar sesión"`, y el problema es que
+     * muchas excepciones de Android llegan con `message == null` (las del
+     * almacén de claves, entre otras). Con eso, un fallo posterior al login se
+     * veía exactamente igual que una contraseña mal escrita, sin forma de
+     * distinguirlos. Ahora, si no hay mensaje, al menos se muestra el tipo de
+     * excepción, y la traza completa queda en Logcat.
+     */
+    private fun describir(e: Exception): String {
+        val detalle = e.message?.takeIf { it.isNotBlank() }
+            ?: e.cause?.message?.takeIf { it.isNotBlank() }
+        return detalle ?: "Error al iniciar sesión (${e.javaClass.simpleName})"
     }
 }
