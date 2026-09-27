@@ -6,30 +6,46 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.logging.HttpLoggingInterceptor
 import org.w3c.dom.Document
+import java.util.concurrent.TimeUnit
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * Cliente SOAP mínimo construido sobre OkHttp (sin librerías externas).
  * Arma el sobre SOAP 1.1 como XML, lo envía por POST y parsea la respuesta.
  *
- * TODO: reemplazar NAMESPACE/URL por los valores reales del WSDL publicado
- * (ver "Contrato_Auth": Protocolo SOAP exclusivamente, vía WSDL versionado).
- * Cuando tengan el WSDL, se puede refinar el mapeo de parámetros/namespaces.
+ * El namespace y la URL salen ahora de [Configuracion]. Antes estaban escritos
+ * aquí con los valores del mock (`urn:upbcientifica-auth` y el puerto 8080);
+ * el WSDL real —users.wsdl— usa el namespace `http://192.168.1.195/soap` y
+ * publica la ruta /soap/user.php en el 8081.
  */
 class SoapClient(
-    private val namespace: String = "urn:upbcientifica-auth",
-    // 10.0.2.2 es la IP especial con la que el EMULADOR de Android ve el "localhost" de tu PC.
-    // Si pruebas en un CELULAR FÍSICO, usa la IP local de tu PC en la red (ej. 192.168.1.X).
-    // TODO Dev A: reemplazar por el host:puerto reales del Authentication Service.
-    private val endpointUrl: String = "http://192.168.20.31:8080/AuthenticationService"
-)  {
-    private val http = OkHttpClient()
+    private val namespace: String = Configuracion.NAMESPACE_AUTH,
+    private val endpointUrl: String = Configuracion.urlAuth
+) {
+    private val http = OkHttpClient.Builder()
+        // Sin timeouts explícitos, una VM apagada deja la app colgada sin más.
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor(
+            HttpLoggingInterceptor().apply {
+                // Con BODY se ve el sobre SOAP entero en Logcat, que es la
+                // forma práctica de depurar un desajuste de contrato.
+                level = HttpLoggingInterceptor.Level.BODY
+            }
+        )
+        .build()
 
     /**
      * Invoca una operación SOAP. [params] son los argumentos en el mismo
      * orden que declara el WSDL para esa operación. Devuelve el Document XML
      * de la respuesta para que el repositorio extraiga los campos que necesita.
+     *
+     * La respuesta se parsea TAMBIÉN cuando el servidor contesta con error:
+     * un 500 de SOAP trae un Fault con el motivo, y el mock responde 500 con el
+     * detalle cuando las credenciales no valen. Antes se descartaba ese cuerpo
+     * y el usuario solo veía un mensaje genérico.
      */
     suspend fun invoke(operation: String, params: Map<String, Any?>): Document =
         withContext(Dispatchers.IO) {
@@ -42,19 +58,37 @@ class SoapClient(
                 .post(body.toRequestBody("text/xml; charset=utf-8".toMediaType()))
                 .build()
 
-            http.newCall(request).execute().use { response ->
-                val xml = response.body?.string()
-                    ?: throw IllegalStateException("Respuesta SOAP vacía para $operation")
-                if (!response.isSuccessful) {
-                    throw IllegalStateException("Error SOAP (${response.code}) en $operation: $xml")
-                }
-                parseXml(xml)
+            val (codigo, xml) = http.newCall(request).execute().use { response ->
+                response.code to response.body?.string().orEmpty()
+            }
+
+            if (xml.isBlank()) {
+                throw IllegalStateException(
+                    "El servicio de autenticación respondió vacío (HTTP $codigo) en $operation"
+                )
+            }
+
+            runCatching { parseXml(xml) }.getOrElse {
+                throw IllegalStateException(
+                    "El servicio de autenticación no devolvió XML en $operation " +
+                        "(HTTP $codigo): ${xml.take(200)}"
+                )
             }
         }
 
+    /**
+     * El elemento de la operación va en el namespace del WSDL; sus HIJOS no.
+     *
+     * El esquema de users.wsdl no declara `elementFormDefault`, así que rige el
+     * valor por omisión, "unqualified": solo el elemento global lleva
+     * namespace. Por eso la operación va con prefijo (`ns:`) y los parámetros
+     * van sueltos: con `xmlns=` por defecto los hijos heredarían el namespace
+     * y PHP los leería como vacíos, respondiendo "usuario o contraseña
+     * incorrectos" aunque fueran correctos.
+     */
     private fun buildSoapEnvelope(operation: String, params: Map<String, Any?>): String {
         val paramsXml = params.entries.joinToString("") { (key, value) ->
-            "<$key>${value ?: ""}</$key>"
+            "<$key>${escaparXml(value?.toString().orEmpty())}</$key>"
         }
         return """
             <?xml version="1.0" encoding="utf-8"?>
@@ -66,6 +100,12 @@ class SoapClient(
             </soap:Envelope>
         """.trimIndent()
     }
+
+    /** Una contraseña con & o < rompería el sobre si no se escapa. */
+    private fun escaparXml(valor: String): String = valor
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
 
     private fun parseXml(xml: String): Document =
         DocumentBuilderFactory.newInstance()

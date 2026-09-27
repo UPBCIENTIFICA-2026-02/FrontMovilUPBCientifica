@@ -4,8 +4,10 @@ import com.upbcientifica.mobile.session.TokenManager
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
+import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 /**
  * Interceptor que agrega el token de sesión (emitido por Authentication Service)
@@ -28,9 +30,27 @@ class AuthHeaderInterceptor(private val tokenManager: TokenManager) : Intercepto
  * solo cambia [baseUrl] y su propia interfaz de API (ver data/<servicio>).
  */
 object RestClient {
+
+    /**
+     * @param baseUrl tiene que terminar en "/" o Retrofit lanza
+     *        IllegalArgumentException al construirse. Las URLs de
+     *        [Configuracion] ya vienen así.
+     */
     fun build(baseUrl: String, tokenManager: TokenManager): Retrofit {
         val httpClient = OkHttpClient.Builder()
             .addInterceptor(AuthHeaderInterceptor(tokenManager))
+            .addInterceptor(
+                HttpLoggingInterceptor().apply {
+                    // BASIC y no BODY: aquí viajan archivos completos, y volcar
+                    // el cuerpo de una descarga a Logcat lo haría inservible.
+                    level = HttpLoggingInterceptor.Level.BASIC
+                }
+            )
+            // Subir o bajar un archivo grande tarda más que una llamada normal,
+            // pero sin límite una VM caída deja la pantalla colgada.
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build()
 
         return Retrofit.Builder()

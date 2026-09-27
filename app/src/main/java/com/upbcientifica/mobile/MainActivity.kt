@@ -9,9 +9,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.upbcientifica.mobile.data.auth.AuthRepository
+import com.upbcientifica.mobile.data.sharedfile.SharedFileApi
 import com.upbcientifica.mobile.data.sharedfile.SharedFileRepository
+import com.upbcientifica.mobile.data.storage.StorageApi
 import com.upbcientifica.mobile.data.storage.StorageRepository
+import com.upbcientifica.mobile.data.streaming.StreamingApi
 import com.upbcientifica.mobile.data.streaming.StreamingRepository
+import com.upbcientifica.mobile.network.Configuracion
+import com.upbcientifica.mobile.network.RestClient
 import com.upbcientifica.mobile.network.SoapClient
 import com.upbcientifica.mobile.session.TokenManager
 import com.upbcientifica.mobile.ui.screens.*
@@ -23,15 +28,46 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // --- Composición manual de dependencias ---
+        //
+        // Este es el único sitio donde se decide qué implementación usa cada
+        // repositorio. Las direcciones salen de Configuracion; para cambiar de
+        // emulador a celular o al laboratorio no hay que tocar este archivo.
         val tokenManager = TokenManager(applicationContext)
         val soapClient = SoapClient()
         val authRepository = AuthRepository(soapClient, tokenManager)
 
-        // Repositorios en modo simulado (usarDatosSimulados=true por defecto).
-        // Cuando el backend real esté listo, pásales el api real y pon el flag en false.
-        val storageRepository = StorageRepository()
-        val sharedFileRepository = SharedFileRepository()
-        val streamingRepository = StreamingRepository()
+        // Distributed Storage (node-repository, puerto 8084) — BACKEND REAL.
+        val storageRepository = StorageRepository(
+            api = RestClient.build(Configuracion.urlStorage, tokenManager)
+                .create(StorageApi::class.java),
+            usarDatosSimulados = false
+        )
+
+        // Streaming (node-media, puerto 8083) — BACKEND REAL.
+        val streamingRepository = StreamingRepository(
+            api = RestClient.build(Configuracion.urlMedia, tokenManager)
+                .create(StreamingApi::class.java),
+            usarDatosSimulados = false
+        )
+
+        /*
+         * Shared File sigue SIMULADO a propósito: no existe ningún servicio que
+         * responda las rutas `/shared-file`. El diagrama de despliegue lo dibuja como
+         * ejecutable `shared-file-svc` dentro de la VM node-repository, pero
+         * todavía no está implementado.
+         *
+         * Cuando exista, basta cambiar SHARED_FILE_DISPONIBLE en Configuracion.
+         */
+        val sharedFileRepository =
+            if (Configuracion.SHARED_FILE_DISPONIBLE) {
+                SharedFileRepository(
+                    api = RestClient.build(Configuracion.urlStorage, tokenManager)
+                        .create(SharedFileApi::class.java),
+                    usarDatosSimulados = false
+                )
+            } else {
+                SharedFileRepository()
+            }
 
         setContent {
             MaterialTheme {

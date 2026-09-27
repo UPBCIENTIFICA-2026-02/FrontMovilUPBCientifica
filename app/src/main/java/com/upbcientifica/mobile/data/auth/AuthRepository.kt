@@ -9,8 +9,13 @@ import org.w3c.dom.Document
  * El ViewModel no sabe (ni le importa) que por debajo esto es SOAP —
  * solo ve funciones suspend que devuelven resultados de dominio.
  *
- * Operaciones según Contrato_Auth: Login, ValidarToken, Logout,
- * RegistrarUsuario, ObtenerPerfil/ObtenerRoles/ObtenerPermisos.
+ * El contrato es el de las operaciones `login`, `validarToken` y `logout` del
+ * WSDL de node-soap (users.wsdl). `login` y `logout` existen ahí precisamente
+ * como alias para este cliente: internamente node-soap las llama
+ * `iniciarSesion` y `cerrarSesion`, con el parámetro `password` en vez de
+ * `contrasena` y devolviendo roles y grupos como elementos repetidos. Los
+ * alias mantienen los nombres y la forma que usa esta app (una sola cadena
+ * separada por comas), así que aquí no hizo falta cambiar nada del contrato.
  */
 class AuthRepository(
     private val soap: SoapClient,
@@ -27,14 +32,33 @@ class AuthRepository(
         )
 
         val token = response.tagText("token")
-            ?: throw AuthError.Desconocido("El servicio no devolvió token")
+        if (token.isNullOrBlank()) {
+            /*
+             * Sin token, el servidor ya explicó por qué en alguno de estos
+             * elementos. Antes se lanzaba siempre "El servicio no devolvió
+             * token", que no distingue una clave mal escrita de un código MFA
+             * pendiente o de un LDAP caído.
+             */
+            val motivo = response.tagText("message")
+                ?: response.tagText("error")
+                ?: response.tagText("faultstring")
+
+            throw when {
+                motivo == null -> AuthError.Desconocido("El servicio de autenticación no devolvió token")
+                motivo.contains("bloquead", ignoreCase = true) -> AuthError.CuentaBloqueada
+                motivo.contains("incorrect", ignoreCase = true) ||
+                    motivo.contains("inválid", ignoreCase = true) ||
+                    motivo.contains("invalid", ignoreCase = true) -> AuthError.CredencialesInvalidas
+                else -> AuthError.Desconocido(motivo)
+            }
+        }
 
         tokenManager.saveToken(token)
 
         return SessionResult(
             token = token,
-            roles = response.tagText("roles")?.split(",").orEmpty(),
-            serviciosAutorizados = response.tagText("mapaServiciosAutorizados")?.split(",").orEmpty()
+            roles = listaSeparadaPorComas(response.tagText("roles")),
+            serviciosAutorizados = listaSeparadaPorComas(response.tagText("mapaServiciosAutorizados"))
         )
     }
 
@@ -46,9 +70,25 @@ class AuthRepository(
 
     suspend fun logout() {
         val token = tokenManager.currentToken() ?: return
-        soap.invoke("logout", mapOf("token" to token))
-        tokenManager.clear()
+        /*
+         * El token se borra pase lo que pase: si el servidor no responde, la
+         * sesión local tiene que cerrarse igual. Dejarlo guardado haría que la
+         * app siguiera "dentro" con una credencial que el usuario ya quiso
+         * abandonar.
+         */
+        try {
+            soap.invoke("logout", mapOf("token" to token))
+        } finally {
+            tokenManager.clear()
+        }
     }
+
+    /** "a,b, c" -> ["a","b","c"]; nulo o vacío -> lista vacía. */
+    private fun listaSeparadaPorComas(valor: String?): List<String> =
+        valor?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
 
     /** Lee el texto del primer elemento con ese nombre local, ignorando el namespace. */
     private fun Document.tagText(localName: String): String? {

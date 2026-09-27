@@ -224,17 +224,48 @@ mobile-client-android/
 
 ## 7. Estado de cada servicio
 
-- **Authentication (SOAP):** funcional contra el mock. El `SoapClient` arma el
-  sobre XML a mano y lo envía con OkHttp (se descartó ksoap2 por estar
-  desactualizada y ser difícil de resolver en Gradle).
-- **Storage / Shared File / Streaming (REST):** pantallas y ViewModels listos.
-  Cada `Repository` tiene un flag `usarDatosSimulados = true` que devuelve datos
-  falsos para desarrollar la UI sin backend. Al conectar el servicio real, se le
-  pasa el `api` construido con `RestClient.build(baseUrl, tokenManager)` y se
-  cambia el flag a `false` — sin tocar ViewModels ni pantallas.
-- **File Sync (gRPC):** desactivado. El plugin de protobuf y las dependencias de
-  gRPC están comentadas en `app/build.gradle.kts` hasta tener el `.proto`.
-- **HPC (RMI):** bloqueado (ver sección 9).
+> **La app ya está conectada al backend real.** Storage y Streaming dejaron de
+> usar datos simulados. Probado de punta a punta en el emulador contra los
+> servicios del repositorio `UPB-CIENTIFICA`.
+
+| Servicio | Protocolo | Estado |
+|---|---|---|
+| Authentication | SOAP | **Conectado.** Al mock o a node-soap real, según `Configuracion.USAR_MOCK_AUTH` |
+| Distributed Storage | HTTP/REST | **Conectado** a node-repository (8084) |
+| Streaming | HTTP/REST | **Conectado** a node-media (8083) |
+| Shared File | HTTP/REST | Simulado: **el servicio no existe en el backend** |
+| File Sync | gRPC | Desactivado: falta generar el stub del `.proto` |
+| HPC | RMI | Sin pantalla (ver sección 9) |
+
+**Dónde se configura todo.** Las direcciones viven en
+`network/Configuracion.kt`, no dispersas por los clientes. Normalmente solo hay
+que tocar dos líneas:
+
+```kotlin
+val entorno: Entorno = Entorno.EMULADOR   // o DISPOSITIVO_FISICO / LABORATORIO
+const val USAR_MOCK_AUTH = true           // false cuando node-soap esté arriba
+```
+
+Si añades una IP nueva ahí, añádela **también** en
+`res/xml/network_security_config.xml`. Si no, Android corta la conexión sin
+mensaje útil y parece que el servidor está caído.
+
+**Sobre el contrato de autenticación.** El backend expone `iniciarSesion` /
+`cerrarSesion`, con el parámetro `password` y devolviendo roles y grupos como
+elementos XML repetidos. Esta app usa `login` / `logout`, con `contrasena` y
+listas separadas por comas. Para no reescribir el cliente, node-soap publica
+`login` y `logout` como **alias** con esta misma forma; por eso `AuthRepository`
+no cambió de contrato. Los dos están declarados en `users.wsdl`.
+
+**Shared File** sigue simulado a propósito: ningún servicio responde las rutas
+`/shared-file`. El diagrama de despliegue lo dibuja como el ejecutable
+`shared-file-svc` dentro de la VM node-repository, pero no existe. Cuando exista,
+basta poner `SHARED_FILE_DISPONIBLE = true` en `Configuracion`.
+
+**File Sync:** el `.proto` ya existe (`node-sync/proto/filesync/filesync.proto`)
+y el servidor funciona. Falta reactivar el plugin de protobuf y generar el stub.
+Ojo al hacerlo: el servidor **ignora** los campos `uid` de los mensajes y saca el
+usuario del token, que viaja como metadata `authorization: Bearer <token>`.
 
 ---
 
@@ -245,14 +276,26 @@ SERVIDOR <<<` que resume los endpoints y campos que el cliente espera. Resumen:
 
 - **Auth (SOAP):** operaciones `login(usuario, contrasena, origenCliente)`,
   `validarToken(token)`, `logout(token)`. `login` debe devolver `token`, `roles`
-  y `mapaServiciosAutorizados`.
+  y `mapaServiciosAutorizados`. ✅ **Ya implementado** en node-soap como alias de
+  `iniciarSesion` / `cerrarSesion`.
 - **Storage (REST):** `GET /storage/directorios/{id}`,
   `POST /storage/archivos` (multipart), `GET /storage/archivos/{id}/descargar`,
-  `DELETE /storage/archivos/{id}`.
+  `DELETE /storage/archivos/{id}`. ✅ **Ya implementado** en node-repository,
+  idéntico campo por campo.
 - **Shared File (REST):** `POST /shared-file/compartir`,
   `GET /shared-file/compartidos-conmigo`, `DELETE /shared-file/compartir/{id}`.
+  ❌ **Sin implementar.** Es lo único que le falta a este cliente para dejar de
+  usar datos simulados.
 - **Streaming (REST):** `GET /streaming/catalogo?pagina=N`,
   `GET /streaming/buscar?criterioTexto=...`, `GET /streaming/{id}/sesion`.
+  ✅ **Ya implementado** en node-media.
+
+Un detalle del sobre SOAP que conviene no perder: el elemento de la operación va
+en el namespace del WSDL, pero **sus hijos no**. El esquema de `users.wsdl` no
+declara `elementFormDefault`, así que rige `unqualified`. Por eso `SoapClient`
+usa un prefijo (`<ns:login><usuario>…`) y no `xmlns=` por defecto: con el
+namespace heredado, PHP lee los parámetros vacíos y responde "usuario o
+contraseña incorrectos" aunque sean correctos.
 
 Si el WSDL o los endpoints reales difieren en nombres, solo debe ajustarse la
 capa `data/` del cliente (nunca `ui/`), y avisar al equipo móvil.

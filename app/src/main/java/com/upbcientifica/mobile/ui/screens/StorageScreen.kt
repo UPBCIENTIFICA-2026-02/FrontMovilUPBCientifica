@@ -11,6 +11,27 @@ import androidx.compose.ui.unit.dp
 import com.upbcientifica.mobile.data.storage.ArchivoDto
 import com.upbcientifica.mobile.ui.state.UiState
 import com.upbcientifica.mobile.ui.viewmodel.StorageViewModel
+import java.util.Locale
+
+/**
+ * Tamaño legible.
+ *
+ * Antes se mostraba siempre `tamanoBytes / 1000` con la etiqueta "KB", así que
+ * un archivo de 240 MB aparecía como "251658 KB". Con los datos simulados no se
+ * notaba porque eran cifras pequeñas; con Storage real, sí.
+ */
+private fun formatearTamano(bytes: Long): String {
+    val unidades = listOf("B", "KB", "MB", "GB", "TB")
+    var valor = bytes.toDouble()
+    var i = 0
+    while (valor >= 1024 && i < unidades.lastIndex) {
+        valor /= 1024
+        i++
+    }
+    // Sin decimales para bytes y KB: "512 B" se lee mejor que "512,0 B".
+    val patron = if (i <= 1) "%.0f %s" else "%.1f %s"
+    return String.format(Locale.getDefault(), patron, valor, unidades[i])
+}
 
 @Composable
 fun StorageScreen(viewModel: StorageViewModel) {
@@ -42,7 +63,7 @@ private fun ArchivoItem(archivo: ArchivoDto) {
         },
         supportingContent = {
             val detalle = if (archivo.tipo == "directorio") "Carpeta"
-                            else "${archivo.tamanoBytes / 1000} KB · v${archivo.version}"
+                            else "${formatearTamano(archivo.tamanoBytes)} · v${archivo.version}"
             Text(detalle)
         },
         leadingContent = {

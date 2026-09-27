@@ -4,6 +4,10 @@
     Permite tráfico HTTP sin cifrar (cleartext) hacia el mock local y los
     servidores del laboratorio mientras se desarrolla.
 
+    Si una dirección NO está en esta lista, Android corta la conexión sin
+    mensaje útil y parece que el servidor está caído. Al añadir una IP nueva
+    en Configuracion.kt hay que añadirla también aquí.
+
     >>> IMPORTANTE ANTES DE PRODUCCIÓN <
     El roadmap exige TLS/cifrado en producción. Antes de entregar/desplegar:
     - Quitar estas direcciones o poner cleartextTrafficPermitted="false".
@@ -11,11 +15,24 @@
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
-        <!-- Emulador viendo el localhost de tu PC (donde corre el mock) -->
+        <!--
+            Emulador de Android Studio: 10.0.2.2 es la dirección con la que el
+            emulador ve el "localhost" del PC anfitrión. Faltaba, así que con
+            Entorno.EMULADOR todas las llamadas morían aquí.
+        -->
+        <domain includeSubdomains="true">10.0.2.2</domain>
+
+        <!--
+            Celular físico en la misma Wi-Fi: IP del PC de desarrollo.
+            Debe coincidir con Configuracion.IP_PC_EN_WIFI.
+        -->
         <domain includeSubdomains="true">192.168.20.31</domain>
 
-        <!-- TODO: agregar aquí las IPs reales de los servidores del laboratorio
-            cuando el equipo los tenga corriendo, por ejemplo: -->
-        <!-- <domain includeSubdomains="true">192.168.1.100</domain> -->
+        <!--
+            VMs del laboratorio / CCA.
+            TODO equipo: añadir el resto a medida que se desplieguen
+            (node-repository, node-media, node-sync).
+        -->
+        <domain includeSubdomains="true">192.168.1.195</domain>
     </domain-config>
 </network-security-config>
