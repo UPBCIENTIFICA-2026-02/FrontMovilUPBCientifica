@@ -3,8 +3,10 @@ package com.upbcientifica.mobile
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -15,16 +17,20 @@ import com.upbcientifica.mobile.data.storage.StorageApi
 import com.upbcientifica.mobile.data.storage.StorageRepository
 import com.upbcientifica.mobile.data.streaming.StreamingApi
 import com.upbcientifica.mobile.data.streaming.StreamingRepository
+import com.upbcientifica.mobile.data.filesync.FileSyncRepository
+import com.upbcientifica.mobile.data.hpc.HpcRepository
 import com.upbcientifica.mobile.network.Configuracion
 import com.upbcientifica.mobile.network.RestClient
 import com.upbcientifica.mobile.network.SoapClient
 import com.upbcientifica.mobile.session.TokenManager
 import com.upbcientifica.mobile.ui.screens.*
-import com.upbcientifica.mobile.ui.screens.PantallaConVolver
+import com.upbcientifica.mobile.ui.theme.UpbCientificaTheme
 import com.upbcientifica.mobile.ui.viewmodel.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Dibuja detrás de las barras del sistema; cada pantalla respeta los insets.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         // --- Composición manual de dependencias ---
@@ -69,59 +75,65 @@ class MainActivity : ComponentActivity() {
                 SharedFileRepository()
             }
 
+        /*
+         * File Sync (gRPC) y HPC (RMI) van SIMULADOS para que la interfaz esté
+         * completa: el primero espera el .proto de Dev D y el segundo la
+         * decisión de protocolo con Dev C (ver README y cada repositorio).
+         * La conectividad que muestra File Sync sí es real.
+         */
+        val fileSyncRepository = FileSyncRepository(applicationContext)
+
         setContent {
-            MaterialTheme {
-                Surface {
-                    // pantallaActual: null = Home; "storage"/"shared_file"/"streaming" = servicio
-                    var loggedIn by remember { mutableStateOf(false) }
-                    var pantallaActual by remember { mutableStateOf<String?>(null) }
+            UpbCientificaTheme {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    // usuario: null = sin sesión. `sesion` cambia en cada login para
+                    // que los ViewModels de servicios empiecen limpios y no muestren
+                    // los archivos de la cuenta anterior tras cerrar sesión.
+                    var usuario by rememberSaveable { mutableStateOf<String?>(null) }
+                    var sesion by rememberSaveable { mutableIntStateOf(0) }
 
-                    when {
-                        // ---------- No autenticado: Login ----------
-                        !loggedIn -> {
-                            val loginViewModel: LoginViewModel = viewModel(
-                                factory = simpleFactory { LoginViewModel(authRepository) }
-                            )
-                            LoginScreen(
-                                viewModel = loginViewModel,
-                                onLoginSuccess = { loggedIn = true }
-                            )
-                        }
+                    val loginViewModel: LoginViewModel = viewModel(
+                        factory = simpleFactory { LoginViewModel(authRepository) }
+                    )
 
-                        // ---------- Autenticado, dentro de un servicio ----------
-                        pantallaActual == "storage" -> {
-                            val vm: StorageViewModel = viewModel(
+                    val actual = usuario
+                    if (actual == null) {
+                        LoginScreen(
+                            viewModel = loginViewModel,
+                            onLoginSuccess = {
+                                sesion++
+                                usuario = it
+                            }
+                        )
+                    } else {
+                        MainScreen(
+                            usuario = actual,
+                            storageViewModel = viewModel(
+                                key = "storage-$sesion",
                                 factory = simpleFactory { StorageViewModel(storageRepository) }
-                            )
-                            PantallaConVolver("Mis archivos", onVolver = { pantallaActual = null }) {
-                                StorageScreen(vm)
-                            }
-                        }
-                        pantallaActual == "shared_file" -> {
-                            val vm: SharedFileViewModel = viewModel(
+                            ),
+                            sharedFileViewModel = viewModel(
+                                key = "shared-$sesion",
                                 factory = simpleFactory { SharedFileViewModel(sharedFileRepository) }
-                            )
-                            PantallaConVolver("Compartidos conmigo", onVolver = { pantallaActual = null }) {
-                                SharedFileScreen(vm)
-                            }
-                        }
-                        pantallaActual == "streaming" -> {
-                            val vm: StreamingViewModel = viewModel(
+                            ),
+                            streamingViewModel = viewModel(
+                                key = "streaming-$sesion",
                                 factory = simpleFactory { StreamingViewModel(streamingRepository) }
-                            )
-                            PantallaConVolver("Streaming", onVolver = { pantallaActual = null }) {
-                                StreamingScreen(vm)
+                            ),
+                            // Repositorio nuevo por sesión: los trabajos simulados
+                            // de una cuenta no deben verse en la siguiente.
+                            hpcViewModel = viewModel(
+                                key = "hpc-$sesion",
+                                factory = simpleFactory { HpcViewModel(HpcRepository()) }
+                            ),
+                            syncViewModel = viewModel(
+                                key = "sync-$sesion",
+                                factory = simpleFactory { SyncViewModel(fileSyncRepository) }
+                            ),
+                            onCerrarSesion = {
+                                loginViewModel.cerrarSesion(onCerrada = { usuario = null })
                             }
-                        }
-                        pantallaActual == "file_sync" -> {
-                            // File Sync (gRPC) sigue pendiente del .proto de Dev D
-                            PantallaConVolver("Sincronización", onVolver = { pantallaActual = null }) {
-                                Text("Servicio de sincronización aún no disponible.")
-                            }
-                        }
-
-                        // ---------- Autenticado, en el Home ----------
-                        else -> HomeScreen(onNavigate = { ruta -> pantallaActual = ruta })
+                        )
                     }
                 }
             }

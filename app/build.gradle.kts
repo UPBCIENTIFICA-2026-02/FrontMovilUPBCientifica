@@ -37,6 +37,8 @@ dependencies {
     // UI - Jetpack Compose
     implementation("androidx.compose.ui:ui:1.6.7")
     implementation("androidx.compose.material3:material3:1.2.1")
+    // Iconos de tipos de archivo (PDF, hoja de cálculo, video...). R8 elimina los no usados.
+    implementation("androidx.compose.material:material-icons-extended:1.6.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.activity:activity-compose:1.9.0")
 

@@ -33,6 +33,23 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
     }
 
     /**
+     * Cierra la sesión y vuelve el estado a Idle. Sin ese reinicio, el
+     * LaunchedEffect de LoginScreen vería otra vez Success y entraría solo.
+     * Un fallo del servidor no importa: AuthRepository borra el token igual.
+     */
+    fun cerrarSesion(onCerrada: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                authRepository.logout()
+            } catch (e: Exception) {
+                android.util.Log.w("LoginViewModel", "Logout remoto falló; la sesión local se cierra igual", e)
+            }
+            _state.value = UiState.Idle
+            onCerrada()
+        }
+    }
+
+    /**
      * Mensaje que sirva para diagnosticar algo.
      *
      * Antes era `e.message ?: "Error al iniciar sesión"`, y el problema es que

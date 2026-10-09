@@ -36,8 +36,8 @@ SOAP/RMI/gRPC nativamente).
 | Distributed Storage  | HTTP/REST   | Implementado                  |
 | Shared File          | HTTP/REST   | Implementado                  |
 | Streaming            | HTTP/REST   | Implementado                  |
-| File Sync            | gRPC        | Pendiente (falta .proto)      |
-| HPC Service          | RMI         | Bloqueado (ver sección 9)     |
+| File Sync            | gRPC        | UI lista, datos simulados     |
+| HPC Service          | RMI         | UI lista, datos simulados     |
 
 **Por qué Kotlin nativo y no React Native / Flutter:** al ser un sistema
 distribuido SOA, el móvil debe hablar los protocolos reales (SOAP, gRPC, etc.).
@@ -234,8 +234,8 @@ mobile-client-android/
 | Distributed Storage | HTTP/REST | **Conectado** a node-repository (8084) |
 | Streaming | HTTP/REST | **Conectado** a node-media (8083) |
 | Shared File | HTTP/REST | Simulado: **el servicio no existe en el backend** |
-| File Sync | gRPC | Desactivado: falta generar el stub del `.proto` |
-| HPC | RMI | Sin pantalla (ver sección 9) |
+| File Sync | gRPC | **Simulado.** Indicador de estado en la barra superior; la conectividad es real, el ciclo de sincronización es simulado hasta generar el stub del `.proto` (`FileSyncRepository`) |
+| HPC | RMI | **Simulado.** Pestaña completa (clúster, trabajos, envío); `HpcRepository` imita EnviarTrabajo, ConsultarEstadoTrabajo y ObtenerEstadoCluster hasta definir protocolo (ver sección 9) |
 
 **Dónde se configura todo.** Las direcciones viven en
 `network/Configuracion.kt`, no dispersas por los clientes. Normalmente solo hay

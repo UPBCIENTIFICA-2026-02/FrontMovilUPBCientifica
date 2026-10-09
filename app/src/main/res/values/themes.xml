@@ -1,3 +1,8 @@
 <resources>
-    <style name="Theme.UpbCientifica" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Solo afecta a la ventana antes de que Compose dibuje; los colores de la
+         app están en ui/theme/Theme.kt. El fondo coincide con `background`
+         para que no haya destello al arrancar. -->
+    <style name="Theme.UpbCientifica" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F9F9FF</item>
+    </style>
 </resources>
