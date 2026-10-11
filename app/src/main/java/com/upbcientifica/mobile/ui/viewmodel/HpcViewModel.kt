@@ -14,7 +14,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-data class DatosHpc(val cluster: EstadoCluster, val trabajos: List<TrabajoHpc>)
+/** cluster es null cuando el servidor no informa el estado del clúster (ver HpcRepository). */
+data class DatosHpc(val cluster: EstadoCluster?, val trabajos: List<TrabajoHpc>)
 
 class HpcViewModel(private val repo: HpcRepository) : ViewModel() {
 
@@ -60,6 +61,20 @@ class HpcViewModel(private val repo: HpcRepository) : ViewModel() {
                 Result.failure(e)
             }
             _enviando.value = false
+            onResultado(resultado)
+            actualizar()
+        }
+    }
+
+    fun cancelarTrabajo(id: String, onResultado: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val resultado = try {
+                Result.success(repo.cancelarTrabajo(id))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
             onResultado(resultado)
             actualizar()
         }

@@ -37,7 +37,7 @@ SOAP/RMI/gRPC nativamente).
 | Shared File          | HTTP/REST   | Implementado                  |
 | Streaming            | HTTP/REST   | Implementado                  |
 | File Sync            | gRPC        | UI lista, datos simulados     |
-| HPC Service          | RMI         | UI lista, datos simulados     |
+| HPC Service          | REST (job-api) | Implementado (job-api hace el RMI) |
 
 **Por qué Kotlin nativo y no React Native / Flutter:** al ser un sistema
 distribuido SOA, el móvil debe hablar los protocolos reales (SOAP, gRPC, etc.).
@@ -212,7 +212,7 @@ mobile-client-android/
             │   ├── sharedfile/     # SharedFileApi, SharedFileRepository
             │   ├── streaming/      # StreamingApi, StreamingRepository
             │   ├── filesync/       # stub (pendiente .proto)
-            │   └── hpc/            # stub (bloqueado por RMI)
+            │   └── hpc/            # HpcApi (job-api REST), HpcRepository
             └── ui/
                 ├── state/          # UiState (Idle/Loading/Success/Error)
                 ├── viewmodel/      # un ViewModel por pantalla
@@ -231,11 +231,11 @@ mobile-client-android/
 | Servicio | Protocolo | Estado |
 |---|---|---|
 | Authentication | SOAP | **Conectado.** Al mock o a node-soap real, según `Configuracion.USAR_MOCK_AUTH` |
-| Distributed Storage | HTTP/REST | **Conectado** a node-repository (8084) |
-| Streaming | HTTP/REST | **Conectado** a node-media (8083) |
+| Distributed Storage | HTTP/REST | **Conectado** a node-repository (8084): navegar, subir archivos (selector del sistema), crear carpeta, descargar al teléfono ("Guardar como"), eliminar, cuota. Imágenes y videos se abren en el visor de la app |
+| Streaming y Photo Album | HTTP/REST | **Conectado** a node-media (8083): pestañas Videos y Fotos, reproducción dentro de la app (ExoPlayer, por rangos y con el token en la cabecera), visor de fotos con zoom, y botón para indexar lo nuevo de Mis archivos. Nada se abre en otra app ni en el navegador |
 | Shared File | HTTP/REST | Simulado: **el servicio no existe en el backend** |
 | File Sync | gRPC | **Simulado.** Indicador de estado en la barra superior; la conectividad es real, el ciclo de sincronización es simulado hasta generar el stub del `.proto` (`FileSyncRepository`) |
-| HPC | RMI | **Simulado.** Pestaña completa (clúster, trabajos, envío); `HpcRepository` imita EnviarTrabajo, ConsultarEstadoTrabajo y ObtenerEstadoCluster hasta definir protocolo (ver sección 9) |
+| HPC | REST → RMI | **Conectado** a job-api (8082), la fachada REST del gestor RMI: enviar (nombre, comando, prioridad), listar, ver salida/error y cancelar. La tarjeta de carga del clúster no tiene datos: job-api aún no expone `/cluster/estado` |
 
 **Dónde se configura todo.** Las direcciones viven en
 `network/Configuracion.kt`, no dispersas por los clientes. Normalmente solo hay
@@ -304,10 +304,11 @@ capa `data/` del cliente (nunca `ui/`), y avisar al equipo móvil.
 
 ## 9. Pendientes del equipo
 
-- **HPC / RMI:** el contrato de HPC exige RMI, pero `java.rmi` no existe en
-  Android ni hay cliente RMI en iOS. **Decisión pendiente con Dev C:** (a) que
-  HPC Service exponga también gRPC/REST para clientes no-JVM, o (b) dejar el
-  envío/consulta de trabajos HPC fuera del cliente móvil en esta versión.
+- **HPC:** `java.rmi` no existe en Android, así que la app habla REST con
+  job-api (que sí hace la llamada RMI al gestor), igual que el portal web.
+  Pendiente: cuando job-api adopte `Contrato_HPC` (código fuente + dataset +
+  procesos en vez de un comando) y exponga `/cluster/estado`, cambiar
+  `HpcApi`, el formulario de `HpcScreen` y la tarjeta del clúster.
 - **File Sync / gRPC:** falta el `.proto` de Dev D. Al tenerlo: descomentar el
   plugin protobuf y las dependencias grpc en `app/build.gradle.kts`, poner el
   `.proto` en `app/src/main/proto/` y regenerar los stubs.

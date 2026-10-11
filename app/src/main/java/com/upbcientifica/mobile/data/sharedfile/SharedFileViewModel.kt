@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.upbcientifica.mobile.data.sharedfile.RecursoCompartidoDto
 import com.upbcientifica.mobile.data.sharedfile.SharedFileRepository
+import com.upbcientifica.mobile.network.mensajeLegible
 import com.upbcientifica.mobile.ui.state.UiState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,7 @@ class SharedFileViewModel(private val repo: SharedFileRepository) : ViewModel() 
             _state.value = try {
                 UiState.Success(repo.compartidosConmigo())
             } catch (e: Exception) {
-                UiState.Error(e.message ?: "Error al cargar compartidos")
+                UiState.Error(e.mensajeLegible("Shared File"))
             }
         }
     }

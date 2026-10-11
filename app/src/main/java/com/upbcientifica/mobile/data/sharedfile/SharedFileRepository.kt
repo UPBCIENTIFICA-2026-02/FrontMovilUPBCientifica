@@ -1,37 +1,26 @@
 package com.upbcientifica.mobile.data.sharedfile
 
 /**
- * >>> NOTA PARA EL PROGRAMADOR DEL SERVIDOR (Dev D, Shared File) <
- * Endpoints REST esperados (ver SharedFileApi.kt):
- *   POST   /shared-file/compartir          -> CompartirResponse
- *   GET    /shared-file/compartidos-conmigo -> lista de RecursoCompartidoDto
- *   DELETE /shared-file/compartir/{id}
- * RecursoCompartidoDto necesita: compartidoId, archivoId, nombreArchivo,
- * propietario, permisoUnix (ej. "r--"). Recordar que este servicio delega
- * la persistencia real en Distributed Storage (no guarda bytes).
+ * Shared File Service. Ver [SharedFileApi].
+ *
+ * Sin [api] (Configuracion.SHARED_FILE_DISPONIBLE = false) NO simula: antes
+ * devolvía un id de mentira al compartir y una lista inventada, y la app
+ * parecía compartir cuando no pasaba nada. Ahora lo dice.
  */
-class SharedFileRepository(
-    private val api: SharedFileApi? = null,
-    private val usarDatosSimulados: Boolean = true
-) {
-    suspend fun compartir(request: CompartirRequest): CompartirResponse {
-        if (usarDatosSimulados) return CompartirResponse("mock-shared-1")
-        return api!!.compartir(request)
-    }
+class SharedFileRepository(private val api: SharedFileApi? = null) {
 
-    suspend fun compartidosConmigo(): List<RecursoCompartidoDto> {
-        if (usarDatosSimulados) return datosSimulados()
-        return api!!.listarCompartidosConmigo()
-    }
+    suspend fun compartir(request: CompartirRequest): CompartirResponse =
+        disponible().compartir(request)
 
-    suspend fun revocar(compartidoId: String) {
-        if (usarDatosSimulados) return
-        api!!.revocar(compartidoId)
-    }
+    suspend fun compartidosConmigo(): List<RecursoCompartidoDto> =
+        disponible().listarCompartidosConmigo()
 
-    // TODO: eliminar cuando el backend real esté conectado
-    private fun datosSimulados(): List<RecursoCompartidoDto> = listOf(
-        RecursoCompartidoDto("s1", "10", "paper_borrador.docx", "maria.lopez", "r--"),
-        RecursoCompartidoDto("s2", "11", "dataset_compartido.zip", "carlos.ruiz", "rw-"),
-    )
+    suspend fun revocar(compartidoId: String) = disponible().revocar(compartidoId)
+
+    private fun disponible(): SharedFileApi = api ?: throw IllegalStateException(NO_DISPONIBLE)
+
+    companion object {
+        const val NO_DISPONIBLE =
+            "El servicio Shared File todavía no existe en el backend, así que no se puede compartir ni ver lo compartido contigo."
+    }
 }

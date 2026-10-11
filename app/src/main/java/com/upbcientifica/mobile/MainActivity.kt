@@ -13,11 +13,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.upbcientifica.mobile.data.auth.AuthRepository
 import com.upbcientifica.mobile.data.sharedfile.SharedFileApi
 import com.upbcientifica.mobile.data.sharedfile.SharedFileRepository
+import com.upbcientifica.mobile.data.storage.ArchivosDelDispositivo
 import com.upbcientifica.mobile.data.storage.StorageApi
 import com.upbcientifica.mobile.data.storage.StorageRepository
 import com.upbcientifica.mobile.data.streaming.StreamingApi
 import com.upbcientifica.mobile.data.streaming.StreamingRepository
 import com.upbcientifica.mobile.data.filesync.FileSyncRepository
+import com.upbcientifica.mobile.data.hpc.HpcApi
 import com.upbcientifica.mobile.data.hpc.HpcRepository
 import com.upbcientifica.mobile.network.Configuracion
 import com.upbcientifica.mobile.network.RestClient
@@ -46,40 +48,50 @@ class MainActivity : ComponentActivity() {
         val storageRepository = StorageRepository(
             api = RestClient.build(Configuracion.urlStorage, tokenManager)
                 .create(StorageApi::class.java),
-            usarDatosSimulados = false
+            usarDatosSimulados = false,
+            // Para el reproductor de video, que pide el archivo por su cuenta.
+            urlBase = Configuracion.urlStorage,
+            token = tokenManager::currentToken
         )
+        val archivosDelDispositivo = ArchivosDelDispositivo(applicationContext.contentResolver)
 
-        // Streaming (node-media, puerto 8083) — BACKEND REAL.
+        // Streaming y Photo Album (node-media, puerto 8083) — BACKEND REAL.
         val streamingRepository = StreamingRepository(
             api = RestClient.build(Configuracion.urlMedia, tokenManager)
                 .create(StreamingApi::class.java),
-            usarDatosSimulados = false
+            usarDatosSimulados = false,
+            urlBase = Configuracion.urlMedia,
+            token = tokenManager::currentToken
         )
 
         /*
-         * Shared File sigue SIMULADO a propósito: no existe ningún servicio que
-         * responda las rutas `/shared-file`. El diagrama de despliegue lo dibuja como
-         * ejecutable `shared-file-svc` dentro de la VM node-repository, pero
-         * todavía no está implementado.
+         * Shared File: no existe ningún servicio que responda las rutas
+         * `/shared-file`. El diagrama de despliegue lo dibuja como ejecutable
+         * `shared-file-svc` dentro de la VM node-repository, pero todavía no
+         * está implementado. Sin él, el repositorio responde que no está
+         * disponible (ya no inventa datos).
          *
          * Cuando exista, basta cambiar SHARED_FILE_DISPONIBLE en Configuracion.
          */
         val sharedFileRepository =
             if (Configuracion.SHARED_FILE_DISPONIBLE) {
                 SharedFileRepository(
-                    api = RestClient.build(Configuracion.urlStorage, tokenManager)
-                        .create(SharedFileApi::class.java),
-                    usarDatosSimulados = false
+                    RestClient.build(Configuracion.urlStorage, tokenManager)
+                        .create(SharedFileApi::class.java)
                 )
             } else {
                 SharedFileRepository()
             }
 
+        // HPC (job-api, puerto 8082) — BACKEND REAL. Android no trae java.rmi,
+        // así que se habla REST con job-api, la fachada HTTP del gestor RMI.
+        val hpcApi = RestClient.build(Configuracion.urlTrabajos, tokenManager)
+            .create(HpcApi::class.java)
+
         /*
-         * File Sync (gRPC) y HPC (RMI) van SIMULADOS para que la interfaz esté
-         * completa: el primero espera el .proto de Dev D y el segundo la
-         * decisión de protocolo con Dev C (ver README y cada repositorio).
-         * La conectividad que muestra File Sync sí es real.
+         * File Sync (gRPC) va SIMULADO para que la interfaz esté completa: el
+         * cliente gRPC está desactivado en build.gradle.kts (ver README).
+         * La conectividad que muestra sí es real.
          */
         val fileSyncRepository = FileSyncRepository(applicationContext)
 
@@ -110,7 +122,7 @@ class MainActivity : ComponentActivity() {
                             usuario = actual,
                             storageViewModel = viewModel(
                                 key = "storage-$sesion",
-                                factory = simpleFactory { StorageViewModel(storageRepository) }
+                                factory = simpleFactory { StorageViewModel(storageRepository, archivosDelDispositivo, sharedFileRepository) }
                             ),
                             sharedFileViewModel = viewModel(
                                 key = "shared-$sesion",
@@ -120,11 +132,11 @@ class MainActivity : ComponentActivity() {
                                 key = "streaming-$sesion",
                                 factory = simpleFactory { StreamingViewModel(streamingRepository) }
                             ),
-                            // Repositorio nuevo por sesión: los trabajos simulados
-                            // de una cuenta no deben verse en la siguiente.
+                            // El servidor filtra los trabajos por el usuario del token,
+                            // así que la cuenta siguiente no ve los de la anterior.
                             hpcViewModel = viewModel(
                                 key = "hpc-$sesion",
-                                factory = simpleFactory { HpcViewModel(HpcRepository()) }
+                                factory = simpleFactory { HpcViewModel(HpcRepository(hpcApi)) }
                             ),
                             syncViewModel = viewModel(
                                 key = "sync-$sesion",

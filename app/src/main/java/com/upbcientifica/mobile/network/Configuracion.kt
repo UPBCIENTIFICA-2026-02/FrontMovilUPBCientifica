@@ -50,9 +50,12 @@ object Configuracion {
      * emite tokens `mock-token-<usuario>-abc123`, que es justo el formato que
      * aceptan Storage y Media cuando corren con MODO_AUTENTICACION=simulado.
      *
-     * Ponlo en false cuando node-soap real esté disponible.
+     * En false usa el SOAP del puerto 8081: node-soap en el laboratorio, o
+     * herramientas/auth-local.js del monorepo en el PC (lo arranca el script
+     * despliegue/cluster-virtualbox/7-iniciar-servicios-windows.ps1). Ojo: el
+     * 8080 del PC lo ocupa ahora node-web, así que el mock no puede correr a la vez.
      */
-    const val USAR_MOCK_AUTH = true
+    const val USAR_MOCK_AUTH = false
 
     // --- Direcciones de las VMs del laboratorio -----------------------------
     // TODO equipo: completar a medida que se desplieguen los servicios.
@@ -60,6 +63,8 @@ object Configuracion {
     private const val HOST_STORAGE_LAB = "192.168.1.195"
     private const val HOST_MEDIA_LAB = "192.168.1.195"
     private const val HOST_SYNC_LAB = "192.168.1.195"
+    /** hpc-master: job-api corre junto al gestor del clúster. */
+    private const val HOST_HPC_LAB = "192.168.1.195"
 
     /** Host del PC de desarrollo, visto desde el dispositivo. */
     private val hostDesarrollo: String
@@ -107,6 +112,17 @@ object Configuracion {
     val urlMedia: String
         get() = if (enLaboratorio) "http://$HOST_MEDIA_LAB:8083/"
         else "http://$hostDesarrollo:8083/"
+
+    /**
+     * HPC Service: job-api, la fachada REST del gestor RMI (puerto 8082).
+     *
+     * La app no habla RMI (Android no trae java.rmi): habla REST con job-api.
+     * En el PC lo arrancan a mano gestor-cluster.jar y job-api.jar del
+     * repositorio RMIUPBCientifica. Retrofit exige la barra final.
+     */
+    val urlTrabajos: String
+        get() = if (enLaboratorio) "http://$HOST_HPC_LAB:8082/"
+        else "http://$hostDesarrollo:8082/"
 
     /**
      * File Sync (node-sync), gRPC sobre TLS.

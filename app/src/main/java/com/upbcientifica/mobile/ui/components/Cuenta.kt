@@ -82,7 +82,9 @@ fun HojaDetalles(
     nombre: String,
     tipo: TipoArchivo,
     filas: List<Pair<String, String>>,
-    onCerrar: () -> Unit
+    onCerrar: () -> Unit,
+    /** Botones opcionales al pie de la hoja (p. ej. "Cancelar trabajo" en HPC). */
+    acciones: (@Composable ColumnScope.() -> Unit)? = null
 ) {
     ModalBottomSheet(onDismissRequest = onCerrar) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
@@ -116,6 +118,10 @@ fun HojaDetalles(
                     Spacer(Modifier.height(2.dp))
                     Text(valor, style = MaterialTheme.typography.bodyLarge)
                 }
+            }
+            if (acciones != null) {
+                Spacer(Modifier.height(16.dp))
+                acciones()
             }
         }
     }

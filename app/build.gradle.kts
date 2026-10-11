@@ -56,6 +56,13 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
+    // --- Reproductor de video dentro de la app (Streaming y Mis archivos) ---
+    // ExoPlayer pide el video por rangos (Range), igual que el <video> del
+    // portal, y permite mandar la cabecera Authorization en cada petición.
+    // 1.3.1 es la última que compila con compileSdk 34.
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    implementation("androidx.media3:media3-ui:1.3.1")
+
     // --- File Sync (gRPC) --- DESACTIVADO hasta tener el .proto de Dev D.
     // implementation("io.grpc:grpc-kotlin-stub:1.4.1")
     // implementation("io.grpc:grpc-okhttp:1.64.0")
