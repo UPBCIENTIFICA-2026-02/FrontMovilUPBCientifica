@@ -301,14 +301,34 @@ fun StorageScreen(viewModel: StorageViewModel, accionesCuenta: @Composable () ->
         HojaDetalles(
             nombre = archivo.nombre,
             tipo = tipoArchivo(archivo.nombre, archivo.esCarpeta),
-            filas = listOf(
-                "Tamaño" to formatearTamano(archivo.tamanoBytes),
-                "Versión" to "v${archivo.version}",
-                "Ubicación" to ruta.joinToString(" / ") { it.nombre },
-                "Identificador" to archivo.id,
-            ),
+            filas = buildList {
+                if (!archivo.esCarpeta) {
+                    add("Tamaño" to formatearTamano(archivo.tamanoBytes))
+                    add("Versión" to "v${archivo.version}")
+                }
+                add("Ubicación" to ruta.joinToString(" / ") { it.nombre })
+                add("Identificador" to archivo.id)
+            },
             onCerrar = { detalle = null },
             acciones = {
+                if (archivo.esCarpeta) {
+                    Button(
+                        onClick = { detalle = null; viewModel.abrirCarpeta(archivo) },
+                        shape = CircleShape,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Abrir carpeta") }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { detalle = null; porCompartir = archivo },
+                        shape = CircleShape,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Compartir carpeta")
+                    }
+                    return@HojaDetalles
+                }
                 if (tipoVisible(archivo.nombre) != null) {
                     Button(
                         onClick = { detalle = null; abierto = archivo; viewModel.abrir(archivo) },
@@ -392,7 +412,7 @@ private fun DialogoCompartir(
 
     AlertDialog(
         onDismissRequest = onCancelar,
-        title = { Text("Compartir \"${archivo.nombre}\"") },
+        title = { Text(if (archivo.esCarpeta) "Compartir la carpeta \"${archivo.nombre}\"" else "Compartir \"${archivo.nombre}\"") },
         text = {
             Column {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -552,7 +572,7 @@ private fun ListaArchivos(
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         if (carpetas.isNotEmpty()) {
             item(key = "h-carpetas") { EncabezadoSeccion("Carpetas") }
-            items(carpetas, key = { it.id }) { FilaArchivo(it, onClick = { onCarpeta(it) }, onDetalles = null) }
+            items(carpetas, key = { it.id }) { FilaArchivo(it, onClick = { onCarpeta(it) }, onDetalles = { onDetalles(it) }) }
         }
         if (archivos.isNotEmpty()) {
             item(key = "h-archivos") { EncabezadoSeccion("Archivos") }
@@ -580,8 +600,8 @@ private fun FilaArchivo(archivo: ArchivoDto, onClick: () -> Unit, onDetalles: ((
         },
         leadingContent = { IconoTipoArchivo(tipo) },
         trailingContent = when {
-            archivo.esCarpeta -> { { Icon(Icons.Rounded.ChevronRight, contentDescription = null) } }
             onDetalles != null -> { { IconButton(onClick = onDetalles) { Icon(Icons.Rounded.MoreVert, contentDescription = "Más opciones") } } }
+            archivo.esCarpeta -> { { Icon(Icons.Rounded.ChevronRight, contentDescription = null) } }
             else -> null
         },
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
@@ -610,7 +630,9 @@ private fun CuadriculaArchivos(
             }
             items(carpetas, key = { it.id }) { carpeta ->
                 // Las carpetas van compactas, como en Drive: solo icono y nombre.
-                OutlinedCard(onClick = { onCarpeta(carpeta) }) {
+                OutlinedCard(
+                    Modifier.combinedClickable(onClick = { onCarpeta(carpeta) }, onLongClick = { onDetalles(carpeta) })
+                ) {
                     Row(
                         Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically

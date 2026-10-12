@@ -3,7 +3,6 @@ package com.upbcientifica.mobile.ui.viewmodel
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.upbcientifica.mobile.data.sharedfile.CompartirRequest
 import com.upbcientifica.mobile.data.sharedfile.NivelPermiso
 import com.upbcientifica.mobile.data.sharedfile.SharedFileRepository
 import com.upbcientifica.mobile.data.sharedfile.TipoDestinatario
@@ -168,8 +167,9 @@ class StorageViewModel(
     }
 
     /**
-     * CompartirArchivo (Contrato_SharedFile). Mientras el servicio no exista en
-     * el backend, el aviso lo explica en vez de fingir que se compartió.
+     * CompartirArchivo o CompartirDirectorio (Contrato_SharedFile), según lo
+     * que sea. Una carpeta compartida comparte también todo lo que se meta
+     * dentro después.
      */
     fun compartir(archivo: ArchivoDto, tipo: TipoDestinatario, destinatario: String, nivel: NivelPermiso) {
         val id = destinatario.trim()
@@ -177,7 +177,8 @@ class StorageViewModel(
         viewModelScope.launch {
             _operacion.value = "Compartiendo ${archivo.nombre}…"
             val aviso = try {
-                val r = compartidos.compartir(CompartirRequest(archivo.id, tipo, id, nivel))
+                val r = if (archivo.tipo == "directorio") compartidos.compartirDirectorio(archivo.id, tipo, id, nivel)
+                        else compartidos.compartirArchivo(archivo.id, tipo, id, nivel)
                 if (r.estadoInvitacion == "PENDIENTE") "Invitación enviada a $id: tendrá acceso cuando la acepte"
                 else "\"${archivo.nombre}\" compartido con $id"
             } catch (e: CancellationException) {

@@ -9,11 +9,21 @@ package com.upbcientifica.mobile.data.sharedfile
  */
 class SharedFileRepository(private val api: SharedFileApi? = null) {
 
-    suspend fun compartir(request: CompartirRequest): CompartirResponse =
-        disponible().compartir(request)
+    suspend fun compartirArchivo(
+        archivoId: String, tipo: TipoDestinatario, destinatario: String, nivel: NivelPermiso
+    ): CompartirResponse = disponible().compartir(CompartirRequest(archivoId, tipo, destinatario, nivel))
 
-    suspend fun compartidosConmigo(): List<RecursoCompartidoDto> =
-        disponible().listarCompartidosConmigo()
+    suspend fun compartirDirectorio(
+        directorioId: String, tipo: TipoDestinatario, destinatario: String, nivel: NivelPermiso
+    ): CompartirResponse =
+        disponible().compartirDirectorio(CompartirDirectorioRequest(directorioId, tipo, destinatario, nivel))
+
+    suspend fun compartidosConmigo(): List<RelacionCompartidoDto> = disponible().listarCompartidosConmigo()
+
+    suspend fun queYoComparto(): List<RelacionCompartidoDto> = disponible().listarQueYoComparto()
+
+    suspend fun cambiarNivel(compartidoId: String, nivel: NivelPermiso): ActualizacionResponse =
+        disponible().actualizar(compartidoId, ActualizarPermisoRequest(nivel))
 
     suspend fun revocar(compartidoId: String) = disponible().revocar(compartidoId)
 
@@ -21,6 +31,6 @@ class SharedFileRepository(private val api: SharedFileApi? = null) {
 
     companion object {
         const val NO_DISPONIBLE =
-            "El servicio Shared File todavía no existe en el backend, así que no se puede compartir ni ver lo compartido contigo."
+            "El servicio Shared File no está configurado en la app (Configuracion.SHARED_FILE_DISPONIBLE)."
     }
 }

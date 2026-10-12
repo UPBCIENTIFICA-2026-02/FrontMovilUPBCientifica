@@ -132,13 +132,14 @@ object Configuracion {
         get() = if (enLaboratorio) "$HOST_SYNC_LAB:9090" else "$hostDesarrollo:9090"
 
     /**
-     * Shared File todavía no existe en el backend.
-     *
-     * No hay ningún servicio que responda las rutas `/shared-file`, así que su pantalla
-     * se queda con datos simulados. Cuando exista, lo más probable es que viva
-     * dentro de node-repository (el diagrama de despliegue lo dibuja como el
-     * ejecutable `shared-file-svc` en esa misma VM), y entonces bastará con
-     * usar [urlStorage] y poner usarDatosSimulados = false en MainActivity.
+     * Shared File Service (node-shared-file): el ejecutable `shared-file-svc`
+     * que el diagrama de despliegue pone en la VM node-repository, puerto 8085.
+     * Retrofit exige la barra final.
      */
-    const val SHARED_FILE_DISPONIBLE = false
+    val urlCompartidos: String
+        get() = if (enLaboratorio) "http://$HOST_STORAGE_LAB:8085/"
+        else "http://$hostDesarrollo:8085/"
+
+    /** En false, la pestaña Compartidos y el botón Compartir avisan de que no hay servicio. */
+    const val SHARED_FILE_DISPONIBLE = true
 }

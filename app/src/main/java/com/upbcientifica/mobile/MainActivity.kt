@@ -64,19 +64,13 @@ class MainActivity : ComponentActivity() {
             token = tokenManager::currentToken
         )
 
-        /*
-         * Shared File: no existe ningún servicio que responda las rutas
-         * `/shared-file`. El diagrama de despliegue lo dibuja como ejecutable
-         * `shared-file-svc` dentro de la VM node-repository, pero todavía no
-         * está implementado. Sin él, el repositorio responde que no está
-         * disponible (ya no inventa datos).
-         *
-         * Cuando exista, basta cambiar SHARED_FILE_DISPONIBLE en Configuracion.
-         */
+        // Shared File (node-shared-file, puerto 8085) — BACKEND REAL. Decide y
+        // registra quién comparte con quién; Storage aplica el permiso, así que
+        // lo compartido se abre y se descarga con storageRepository.
         val sharedFileRepository =
             if (Configuracion.SHARED_FILE_DISPONIBLE) {
                 SharedFileRepository(
-                    RestClient.build(Configuracion.urlStorage, tokenManager)
+                    RestClient.build(Configuracion.urlCompartidos, tokenManager)
                         .create(SharedFileApi::class.java)
                 )
             } else {
@@ -126,7 +120,9 @@ class MainActivity : ComponentActivity() {
                             ),
                             sharedFileViewModel = viewModel(
                                 key = "shared-$sesion",
-                                factory = simpleFactory { SharedFileViewModel(sharedFileRepository) }
+                                factory = simpleFactory {
+                                    SharedFileViewModel(sharedFileRepository, storageRepository, archivosDelDispositivo)
+                                }
                             ),
                             streamingViewModel = viewModel(
                                 key = "streaming-$sesion",

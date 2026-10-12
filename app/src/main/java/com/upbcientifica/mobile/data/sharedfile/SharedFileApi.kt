@@ -3,12 +3,8 @@ package com.upbcientifica.mobile.data.sharedfile
 import retrofit2.http.*
 
 /**
- * Shared File Service (Contrato_SharedFile, HTTP/REST).
- *
- * OJO: el servicio todavía NO existe en el backend. Los nombres de campos y
- * valores siguen el contrato (CompartirArchivo, ListarCompartidosConmigo,
- * DejarDeCompartir); las RUTAS no las fija el contrato y son una propuesta que
- * hay que confirmar con quien implemente el servicio.
+ * Shared File Service (Contrato_SharedFile, HTTP/REST), puerto 8085 en la VM
+ * node-repository. Rutas de node-shared-file/src/rutas/compartidos.js.
  */
 interface SharedFileApi {
 
@@ -16,9 +12,21 @@ interface SharedFileApi {
     @POST("/shared-file/compartir")
     suspend fun compartir(@Body request: CompartirRequest): CompartirResponse
 
+    /** CompartirDirectorio: el permiso se hereda a todo el contenido, presente y futuro. */
+    @POST("/shared-file/compartir-directorio")
+    suspend fun compartirDirectorio(@Body request: CompartirDirectorioRequest): CompartirResponse
+
     /** ListarCompartidosConmigo. */
     @GET("/shared-file/compartidos-conmigo")
-    suspend fun listarCompartidosConmigo(): List<RecursoCompartidoDto>
+    suspend fun listarCompartidosConmigo(@Query("pagina") pagina: Int = 0): List<RelacionCompartidoDto>
+
+    /** ListarQueYoComparto. */
+    @GET("/shared-file/que-yo-comparto")
+    suspend fun listarQueYoComparto(@Query("pagina") pagina: Int = 0): List<RelacionCompartidoDto>
+
+    /** ActualizarPermisosCompartidos. */
+    @PATCH("/shared-file/compartir/{id}")
+    suspend fun actualizar(@Path("id") compartidoId: String, @Body cuerpo: ActualizarPermisoRequest): ActualizacionResponse
 
     /** DejarDeCompartir. */
     @DELETE("/shared-file/compartir/{id}")
@@ -43,6 +51,14 @@ data class CompartirRequest(
     val expiracion: String? = null,
 )
 
+data class CompartirDirectorioRequest(
+    val directorioId: String,
+    val destinatarioTipo: TipoDestinatario,
+    val destinatarioId: String,
+    val nivelPermiso: NivelPermiso,
+    val expiracion: String? = null,
+)
+
 /** Salida de CompartirArchivo. estadoInvitacion: PENDIENTE o ACTIVO. */
 data class CompartirResponse(
     val compartidoId: String,
@@ -50,10 +66,27 @@ data class CompartirResponse(
     val estadoInvitacion: String? = null,
 )
 
-data class RecursoCompartidoDto(
+data class ActualizarPermisoRequest(val nuevoNivelPermiso: NivelPermiso)
+
+/** advertencia: SHR-201, cuando se degrada a alguien que ya volvió a compartir. */
+data class ActualizacionResponse(val compartidoId: String, val nivelPermiso: NivelPermiso, val advertencia: Advertencia?)
+
+data class Advertencia(val codigo: String, val mensaje: String)
+
+/** RelacionCompartido con los metadatos actuales del elemento (vienen de Storage). */
+data class RelacionCompartidoDto(
     val compartidoId: String,
-    val archivoId: String,
-    val nombreArchivo: String,
+    val elementoId: String,
+    val elementoTipo: String,        // ARCHIVO | DIRECTORIO
+    val nombre: String,
+    val tamanoBytes: Long,
     val propietario: String,
-    val permisoUnix: String
-)
+    val compartidoPor: String,
+    val destinatarioTipo: TipoDestinatario,
+    val destinatarioId: String,
+    val nivelPermiso: NivelPermiso,
+    val fechaCompartido: String?,
+    val fechaExpiracion: String?,
+) {
+    val esDirectorio get() = elementoTipo == "DIRECTORIO"
+}
