@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.upbcientifica.mobile.data.streaming.ContenidoDto
 import com.upbcientifica.mobile.data.streaming.FotoDto
+import com.upbcientifica.mobile.data.streaming.OrdenMedios
 import com.upbcientifica.mobile.data.streaming.StreamingRepository
 import com.upbcientifica.mobile.network.mensajeLegible
 import com.upbcientifica.mobile.ui.components.EstadoVisor
@@ -35,6 +36,12 @@ class StreamingViewModel(private val repo: StreamingRepository) : ViewModel() {
     private val _visor = MutableStateFlow<EstadoVisor?>(null)
     val visor: StateFlow<EstadoVisor?> = _visor
 
+    /** Orden del catálogo y del álbum; lo aplica node-media (ordenPor). */
+    private val _ordenVideos = MutableStateFlow(OrdenMedios.RECIENTES)
+    val ordenVideos: StateFlow<OrdenMedios> = _ordenVideos
+    private val _ordenFotos = MutableStateFlow(OrdenMedios.RECIENTES)
+    val ordenFotos: StateFlow<OrdenMedios> = _ordenFotos
+
     private val _indexando = MutableStateFlow(false)
     val indexando: StateFlow<Boolean> = _indexando
 
@@ -56,7 +63,7 @@ class StreamingViewModel(private val repo: StreamingRepository) : ViewModel() {
         viewModelScope.launch {
             _state.value = UiState.Loading
             _state.value = try {
-                UiState.Success(repo.catalogo())
+                UiState.Success(repo.catalogo(orden = _ordenVideos.value))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -69,7 +76,7 @@ class StreamingViewModel(private val repo: StreamingRepository) : ViewModel() {
         viewModelScope.launch {
             _fotos.value = UiState.Loading
             _fotos.value = try {
-                UiState.Success(repo.fotos())
+                UiState.Success(repo.fotos(orden = _ordenFotos.value))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -78,9 +85,22 @@ class StreamingViewModel(private val repo: StreamingRepository) : ViewModel() {
         }
     }
 
+    fun ordenarVideos(orden: OrdenMedios) {
+        if (_ordenVideos.value == orden) return
+        _ordenVideos.value = orden
+        cargar()
+    }
+
+    fun ordenarFotos(orden: OrdenMedios) {
+        if (_ordenFotos.value == orden || orden == OrdenMedios.MAS_VISTOS) return
+        _ordenFotos.value = orden
+        cargarFotos()
+    }
+
     /**
-     * Busca en Mis archivos fotos y videos nuevos. Lo que se sube a Storage no
-     * aparece aquí hasta indexar (node-media no se entera solo).
+     * Busca ya mismo fotos y videos nuevos en Mis archivos y en lo compartido
+     * contigo. node-media también lo hace solo al cargar (como mucho una vez
+     * por minuto).
      */
     fun indexar() {
         if (_indexando.value) return
@@ -88,8 +108,8 @@ class StreamingViewModel(private val repo: StreamingRepository) : ViewModel() {
             _indexando.value = true
             val aviso = try {
                 val r = repo.indexar()
-                if (r.indexados == 0) "No hay fotos ni videos nuevos en Mis archivos"
-                else "${r.indexados} nuevos de ${r.revisados} archivos revisados"
+                if (r.indexados == 0 && r.compartidos == 0) "No hay fotos ni videos nuevos"
+                else "${r.indexados} tuyos y ${r.compartidos} compartidos contigo en el catálogo"
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -103,18 +123,24 @@ class StreamingViewModel(private val repo: StreamingRepository) : ViewModel() {
     }
 
     /** Miniatura ya decodificada, o null si la foto no tiene o falló. */
-    suspend fun miniatura(foto: FotoDto): ImageBitmap? {
-        if (!foto.tieneMiniatura) return null
-        candado.withLock { if (miniaturas.containsKey(foto.id)) return miniaturas[foto.id] }
+    suspend fun miniatura(foto: FotoDto): ImageBitmap? =
+        if (!foto.tieneMiniatura) null else miniaturaEnCache(foto.id) { repo.miniatura(foto.id) }
+
+    /** Vista previa del video (FFmpeg en node-media), o null si no la hay. */
+    suspend fun miniatura(video: ContenidoDto): ImageBitmap? =
+        if (!video.tieneMiniatura) null else miniaturaEnCache("v:${video.id}") { repo.miniaturaVideo(video.id) }
+
+    private suspend fun miniaturaEnCache(clave: String, descargar: suspend () -> ByteArray): ImageBitmap? {
+        candado.withLock { if (miniaturas.containsKey(clave)) return miniaturas[clave] }
         val imagen = try {
-            val bytes = withContext(Dispatchers.IO) { repo.miniatura(foto.id) }
+            val bytes = withContext(Dispatchers.IO) { descargar() }
             withContext(Dispatchers.Default) { decodificarImagen(bytes, ladoMaximo = 512) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             null
         }
-        candado.withLock { miniaturas[foto.id] = imagen }
+        candado.withLock { miniaturas[clave] = imagen }
         return imagen
     }
 

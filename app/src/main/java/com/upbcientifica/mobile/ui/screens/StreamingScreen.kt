@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material.icons.outlined.VideoLibrary
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.ImageSearch
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.*
@@ -33,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.upbcientifica.mobile.data.streaming.ContenidoDto
 import com.upbcientifica.mobile.data.streaming.FotoDto
+import com.upbcientifica.mobile.data.streaming.OrdenMedios
 import com.upbcientifica.mobile.ui.components.*
 import com.upbcientifica.mobile.ui.state.UiState
 import com.upbcientifica.mobile.ui.viewmodel.StreamingViewModel
@@ -48,6 +51,13 @@ private val DegradadosMiniatura = listOf(
 )
 
 private enum class Seccion(val etiqueta: String) { VIDEOS("Videos"), FOTOS("Fotos") }
+
+/** Etiqueta de cada orden. MAS_VISTOS solo existe en videos (las fotos no se "reproducen"). */
+private fun OrdenMedios.etiqueta() = when (this) {
+    OrdenMedios.RECIENTES -> "Recientes"
+    OrdenMedios.MAS_VISTOS -> "Más vistos"
+    OrdenMedios.ALFABETICO -> "Título (A-Z)"
+}
 
 /** Lo que se puede borrar desde esta pantalla. */
 private sealed interface Medio {
@@ -70,6 +80,9 @@ fun StreamingScreen(viewModel: StreamingViewModel, accionesCuenta: @Composable (
     val fotos by viewModel.fotos.collectAsState()
     val visor by viewModel.visor.collectAsState()
     val indexando by viewModel.indexando.collectAsState()
+    val ordenVideos by viewModel.ordenVideos.collectAsState()
+    val ordenFotos by viewModel.ordenFotos.collectAsState()
+    var menuOrden by remember { mutableStateOf(false) }
 
     var consulta by rememberSaveable { mutableStateOf("") }
     var seccion by rememberSaveable { mutableStateOf(Seccion.VIDEOS) }
@@ -107,7 +120,34 @@ fun StreamingScreen(viewModel: StreamingViewModel, accionesCuenta: @Composable (
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Streaming", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                // Lo subido a Mis archivos no aparece aquí hasta que node-media lo indexa.
+                // Ordenar: lo aplica node-media (ordenPor del Contrato_Streaming).
+                Box {
+                    IconButton(onClick = { menuOrden = true }) {
+                        Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Ordenar")
+                    }
+                    DropdownMenu(expanded = menuOrden, onDismissRequest = { menuOrden = false }) {
+                        val actual = if (seccion == Seccion.VIDEOS) ordenVideos else ordenFotos
+                        val opciones = if (seccion == Seccion.VIDEOS) OrdenMedios.entries
+                        else OrdenMedios.entries - OrdenMedios.MAS_VISTOS
+                        Text(
+                            "Ordenar por",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                        opciones.forEach { o ->
+                            DropdownMenuItem(
+                                text = { Text(o.etiqueta()) },
+                                trailingIcon = { if (o == actual) RadioButton(selected = true, onClick = null) },
+                                onClick = {
+                                    menuOrden = false
+                                    if (seccion == Seccion.VIDEOS) viewModel.ordenarVideos(o) else viewModel.ordenarFotos(o)
+                                }
+                            )
+                        }
+                    }
+                }
+                // node-media busca lo nuevo solo al cargar; este botón lo fuerza al momento.
                 if (indexando) {
                     CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                 } else {
@@ -184,7 +224,7 @@ private fun Videos(
                 estado.data.isEmpty() -> EstadoVacio(
                     icono = Icons.Outlined.VideoLibrary,
                     titulo = "No hay videos",
-                    mensaje = "Sube videos a Mis archivos y toca el botón de buscar contenido nuevo."
+                    mensaje = "Los videos de Mis archivos y los que te compartan aparecen aquí."
                 )
                 visibles.isEmpty() -> EstadoVacio(
                     icono = Icons.Outlined.SearchOff,
@@ -200,9 +240,10 @@ private fun Videos(
                 ) {
                     items(visibles, key = { it.id }) { video ->
                         TarjetaVideo(
-                            video,
+                            video, viewModel,
                             onClick = { onAbrir(Medio.Video(video)) },
-                            onEliminar = { onEliminar(Medio.Video(video)) }
+                            // Solo el dueño puede borrarlo: no se ofrece en lo compartido.
+                            onEliminar = if (video.compartido) null else ({ onEliminar(Medio.Video(video)) })
                         )
                     }
                 }
@@ -228,7 +269,7 @@ private fun Fotos(
                 estado.data.isEmpty() -> EstadoVacio(
                     icono = Icons.Outlined.PhotoLibrary,
                     titulo = "No hay fotos",
-                    mensaje = "Sube fotos a Mis archivos y toca el botón de buscar contenido nuevo."
+                    mensaje = "Las fotos de Mis archivos y las que te compartan aparecen aquí."
                 )
                 visibles.isEmpty() -> EstadoVacio(
                     icono = Icons.Outlined.SearchOff,
@@ -246,7 +287,7 @@ private fun Fotos(
                         TarjetaFoto(
                             foto, viewModel,
                             onClick = { onAbrir(Medio.Foto(foto)) },
-                            onEliminar = { onEliminar(Medio.Foto(foto)) }
+                            onEliminar = if (foto.compartido) null else ({ onEliminar(Medio.Foto(foto)) })
                         )
                     }
                 }
@@ -257,9 +298,16 @@ private fun Fotos(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TarjetaVideo(video: ContenidoDto, onClick: () -> Unit, onEliminar: () -> Unit) {
+private fun TarjetaVideo(
+    video: ContenidoDto,
+    viewModel: StreamingViewModel,
+    onClick: () -> Unit,
+    onEliminar: (() -> Unit)?
+) {
     val (desde, hasta) = DegradadosMiniatura[video.id.hashCode().absoluteValue % DegradadosMiniatura.size]
     var menu by remember { mutableStateOf(false) }
+    // La vista previa la genera node-media; mientras llega (o si no hay) se ve el degradado.
+    val miniatura by produceState<ImageBitmap?>(initialValue = null, video.id) { value = viewModel.miniatura(video) }
     // Tocar reproduce; mantener pulsado (o el menú ⋮) ofrece eliminar.
     Column(Modifier.clip(MaterialTheme.shapes.medium).combinedClickable(onClick = onClick, onLongClick = onEliminar)) {
         Box(
@@ -270,6 +318,9 @@ private fun TarjetaVideo(video: ContenidoDto, onClick: () -> Unit, onEliminar: (
                 .background(Brush.linearGradient(listOf(desde, hasta))),
             contentAlignment = Alignment.Center
         ) {
+            miniatura?.let {
+                Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
             Box(
                 Modifier
                     .size(44.dp)
@@ -301,11 +352,20 @@ private fun TarjetaVideo(video: ContenidoDto, onClick: () -> Unit, onEliminar: (
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (video.compartido) {
+                    Text(
+                        "Compartido por ${video.propietario}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 fechaCorta(video.fecha)?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Box {
+            if (onEliminar != null) Box {
                 IconButton(onClick = { menu = true }) {
                     Icon(Icons.Rounded.MoreVert, contentDescription = "Más opciones")
                 }
@@ -323,7 +383,7 @@ private fun TarjetaVideo(video: ContenidoDto, onClick: () -> Unit, onEliminar: (
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TarjetaFoto(foto: FotoDto, viewModel: StreamingViewModel, onClick: () -> Unit, onEliminar: () -> Unit) {
+private fun TarjetaFoto(foto: FotoDto, viewModel: StreamingViewModel, onClick: () -> Unit, onEliminar: (() -> Unit)?) {
     // La miniatura se pide con el token al aparecer en pantalla y queda en caché.
     val miniatura by produceState<ImageBitmap?>(initialValue = null, foto.id) { value = viewModel.miniatura(foto) }
     Box(
@@ -340,6 +400,21 @@ private fun TarjetaFoto(foto: FotoDto, viewModel: StreamingViewModel, onClick: (
             Image(imagen, contentDescription = foto.titulo, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
             Icon(Icons.Rounded.Image, contentDescription = foto.titulo, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (foto.compartido) {
+            // Insignia de "compartida contigo", como en Drive.
+            Icon(
+                Icons.Rounded.People,
+                contentDescription = "Compartida por ${foto.propietario}",
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(3.dp)
+                    .size(14.dp)
+            )
         }
     }
 }

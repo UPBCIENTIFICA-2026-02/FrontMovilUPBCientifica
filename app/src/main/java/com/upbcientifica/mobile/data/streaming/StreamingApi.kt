@@ -16,8 +16,13 @@ import retrofit2.http.Query
  */
 interface StreamingApi {
 
+    /** Propio + compartido contigo. ordenPor: RECIENTES (por defecto), MAS_VISTOS o ALFABETICO. */
     @GET("/streaming/catalogo")
-    suspend fun listarCatalogo(@Query("pagina") pagina: Int): List<ContenidoDto>
+    suspend fun listarCatalogo(@Query("pagina") pagina: Int, @Query("ordenPor") ordenPor: String? = null): List<ContenidoDto>
+
+    /** Vista previa del video (la genera node-media con FFmpeg al indexar). */
+    @GET("/streaming/{id}/miniatura")
+    suspend fun miniaturaVideo(@Path("id") contenidoId: String): ResponseBody
 
     @GET("/streaming/buscar")
     suspend fun buscarContenido(@Query("criterioTexto") criterio: String): List<ContenidoDto>
@@ -31,8 +36,9 @@ interface StreamingApi {
 
     // --- Photo Album ---
 
+    /** Propias + compartidas contigo. ordenPor: RECIENTES (por defecto) o ALFABETICO. */
     @GET("/album/fotos")
-    suspend fun listarFotos(@Query("pagina") pagina: Int): List<FotoDto>
+    suspend fun listarFotos(@Query("pagina") pagina: Int, @Query("ordenPor") ordenPor: String? = null): List<FotoDto>
 
     @GET("/album/fotos/{id}/miniatura")
     suspend fun miniatura(@Path("id") fotoId: String): ResponseBody
@@ -45,14 +51,28 @@ interface StreamingApi {
     suspend fun eliminarFoto(@Path("id") fotoId: String)
 
     /**
-     * Recorre Mis archivos y cataloga fotos y videos nuevos. Hasta que no se
-     * indexa, lo que se sube a Storage no aparece en Fotos ni en Streaming.
+     * Recorre Mis archivos y lo compartido contigo y cataloga fotos y videos
+     * nuevos. node-media ya lo hace solo al pedir la primera página (como mucho
+     * una vez por minuto); esto lo fuerza al momento.
      */
     @POST("/album/indexar")
     suspend fun indexar(): IndexacionDto
 }
 
-data class ContenidoDto(val id: String, val titulo: String, val duracionSegundos: Int, val fecha: String? = null)
+/** [compartido] = te lo compartió [propietario]. */
+data class ContenidoDto(
+    val id: String,
+    val titulo: String,
+    val duracionSegundos: Int,
+    val fecha: String? = null,
+    val tieneMiniatura: Boolean = false,
+    val visualizaciones: Int = 0,
+    val propietario: String? = null,
+    val compartido: Boolean = false,
+)
+
+/** ordenPor del Contrato_Streaming. MAS_VISTOS solo aplica a videos. */
+enum class OrdenMedios { RECIENTES, MAS_VISTOS, ALFABETICO }
 
 /** manifestUrl llega como ruta relativa: "/streaming/{id}/contenido". */
 data class SesionStreamingDto(val sesionId: String, val manifestUrl: String)
@@ -66,7 +86,9 @@ data class FotoDto(
     val alto: Int?,
     val tieneMiniatura: Boolean,
     val fecha: String?,
+    val propietario: String? = null,
+    val compartido: Boolean = false,
 )
 
 /** Respuesta de /album/indexar (IndexadorService.indexarHome). */
-data class IndexacionDto(val indexados: Int, val revisados: Int)
+data class IndexacionDto(val indexados: Int, val revisados: Int, val compartidos: Int = 0)
