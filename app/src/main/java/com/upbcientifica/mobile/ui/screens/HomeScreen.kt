@@ -8,8 +8,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDone
-import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.CloudQueue
 import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.SyncProblem
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material.icons.outlined.FolderShared
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.PlayCircle
@@ -55,6 +57,7 @@ fun HomeScreen(
     usuario: String,
     estadoSync: EstadoSincronizacion,
     onNavigate: (Pestana) -> Unit,
+    onAbrirSync: () -> Unit,
     accionesCuenta: @Composable () -> Unit
 ) {
     // Cada servicio tiene su par de colores del tema para diferenciarlos sin romper el modo oscuro.
@@ -110,7 +113,7 @@ fun HomeScreen(
             }
         }
 
-        item(span = { GridItemSpan(maxLineSpan) }) { FranjaSincronizacion(estadoSync) }
+        item(span = { GridItemSpan(maxLineSpan) }) { FranjaSincronizacion(estadoSync, onAbrirSync) }
 
         item(span = { GridItemSpan(maxLineSpan) }) {
             EncabezadoSeccion("Servicios", Modifier.offset(x = (-16).dp))
@@ -123,26 +126,37 @@ fun HomeScreen(
     }
 }
 
-/** Resumen en texto del mismo estado que muestra el icono de la barra superior. */
+/** Resumen en texto del mismo estado que muestra el icono de la barra superior. Abre File Sync. */
 @Composable
-private fun FranjaSincronizacion(estado: EstadoSincronizacion) {
+private fun FranjaSincronizacion(estado: EstadoSincronizacion, onClick: () -> Unit) {
     val (icono, color, titulo, detalle) = when (estado) {
+        EstadoSincronizacion.SinConfigurar -> Cuarteto(
+            Icons.Outlined.CloudQueue, MaterialTheme.colorScheme.onSurfaceVariant,
+            "Respalda una carpeta del teléfono", "Toca para elegirla; se sincroniza sola en el Wi-Fi del servidor"
+        )
         is EstadoSincronizacion.AlDia -> Cuarteto(
             Icons.Outlined.CloudDone, MaterialTheme.colorScheme.exito,
-            "Todo sincronizado", "Última sincronización ${formatearHace(estado.ultimaSincronizacion)}"
+            "Todo sincronizado",
+            if (estado.ultimaSincronizacion == 0L) "Aún no se ha sincronizado"
+            else "Última sincronización ${formatearHace(estado.ultimaSincronizacion)}"
         )
         is EstadoSincronizacion.Sincronizando -> Cuarteto(
             Icons.Outlined.CloudSync, MaterialTheme.colorScheme.primary,
             "Sincronizando…",
-            if (estado.pendientes > 0) "Faltan ${estado.pendientes} cambios por subir" else "Buscando cambios"
+            if (estado.pendientes > 0) "Faltan ${estado.pendientes} cambios" else "Buscando cambios"
         )
         EstadoSincronizacion.SinConexion -> Cuarteto(
-            Icons.Outlined.CloudOff, MaterialTheme.colorScheme.error,
-            "Sin conexión", "Los cambios se subirán cuando vuelva la red"
+            Icons.Outlined.WifiOff, MaterialTheme.colorScheme.onSurfaceVariant,
+            "Esperando la red del servidor", "Se sincronizará al conectarte a su Wi-Fi"
+        )
+        is EstadoSincronizacion.Error -> Cuarteto(
+            Icons.Outlined.SyncProblem, MaterialTheme.colorScheme.error,
+            "No se pudo sincronizar", estado.mensaje
         )
     }
 
     Surface(
+        onClick = onClick,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)

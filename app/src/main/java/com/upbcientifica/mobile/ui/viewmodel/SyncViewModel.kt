@@ -1,22 +1,26 @@
 package com.upbcientifica.mobile.ui.viewmodel
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import com.upbcientifica.mobile.data.filesync.ConfigSync
 import com.upbcientifica.mobile.data.filesync.EstadoSincronizacion
 import com.upbcientifica.mobile.data.filesync.FileSyncRepository
-import kotlinx.coroutines.flow.SharingStarted
+import com.upbcientifica.mobile.data.filesync.Programacion
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
 
-class SyncViewModel(repo: FileSyncRepository) : ViewModel() {
+/**
+ * Pantalla de File Sync e indicador de la barra superior. El estado vive en el
+ * repositorio (uno por proceso) y no aquí, porque la sincronización la puede
+ * disparar el Wi-Fi en segundo plano sin que esta pantalla exista.
+ */
+class SyncViewModel(private val repo: FileSyncRepository) : ViewModel() {
 
-    /**
-     * Se mantiene vivo 5 s sin observadores para que un giro de pantalla no
-     * reinicie el ciclo de sincronización.
-     */
-    val estado: StateFlow<EstadoSincronizacion> = repo.estado().stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = EstadoSincronizacion.Sincronizando(progreso = 0f, pendientes = 0)
-    )
+    val estado: StateFlow<EstadoSincronizacion> = repo.estado
+    val config: StateFlow<ConfigSync> = repo.config
+
+    fun elegirCarpeta(arbol: Uri) = repo.elegirCarpeta(arbol)
+    fun cambiarCarpetaRemota(nombre: String) = repo.cambiarCarpetaRemota(nombre)
+    fun alConectarWifi(activo: Boolean) = repo.alConectarWifi(activo)
+    fun programar(programacion: Programacion, hora: Int, minuto: Int) = repo.programar(programacion, hora, minuto)
+    fun sincronizarAhora() = repo.sincronizarAhora()
 }

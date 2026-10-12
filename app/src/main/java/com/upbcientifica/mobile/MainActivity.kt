@@ -18,7 +18,7 @@ import com.upbcientifica.mobile.data.storage.StorageApi
 import com.upbcientifica.mobile.data.storage.StorageRepository
 import com.upbcientifica.mobile.data.streaming.StreamingApi
 import com.upbcientifica.mobile.data.streaming.StreamingRepository
-import com.upbcientifica.mobile.data.filesync.FileSyncRepository
+import com.upbcientifica.mobile.data.filesync.FileSyncModulo
 import com.upbcientifica.mobile.data.hpc.HpcApi
 import com.upbcientifica.mobile.data.hpc.HpcRepository
 import com.upbcientifica.mobile.network.Configuracion
@@ -83,11 +83,13 @@ class MainActivity : ComponentActivity() {
             .create(HpcApi::class.java)
 
         /*
-         * File Sync (gRPC) va SIMULADO para que la interfaz esté completa: el
-         * cliente gRPC está desactivado en build.gradle.kts (ver README).
-         * La conectividad que muestra sí es real.
+         * File Sync (node-sync, gRPC 9090) — BACKEND REAL.
+         * ANTES iba simulado (gRPC desactivado). AHORA respalda una carpeta del
+         * teléfono en el Home y se sincroniza sola al llegar al Wi-Fi del
+         * servidor. Lo crea FileSyncModulo y no este archivo porque el trabajo
+         * en segundo plano necesita la misma instancia sin pasar por aquí.
          */
-        val fileSyncRepository = FileSyncRepository(applicationContext)
+        val fileSyncRepository = FileSyncModulo.repositorio(applicationContext)
 
         setContent {
             UpbCientificaTheme {
@@ -103,6 +105,8 @@ class MainActivity : ComponentActivity() {
                     )
 
                     val actual = usuario
+                    // La sincronización en segundo plano sigue al usuario con sesión.
+                    LaunchedEffect(actual) { actual?.let(fileSyncRepository::iniciarSesion) }
                     if (actual == null) {
                         LoginScreen(
                             viewModel = loginViewModel,
@@ -139,6 +143,7 @@ class MainActivity : ComponentActivity() {
                                 factory = simpleFactory { SyncViewModel(fileSyncRepository) }
                             ),
                             onCerrarSesion = {
+                                fileSyncRepository.cerrarSesion()
                                 loginViewModel.cerrarSesion(onCerrada = { usuario = null })
                             }
                         )

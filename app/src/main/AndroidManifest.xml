@@ -11,6 +11,13 @@
         android:theme="@style/Theme.UpbCientifica">
 
 
+        <!-- File Sync: lo despierta el sistema al conectarse un Wi-Fi, aunque la
+             app esté cerrada (RedLocal.vigilarConexionWifi). Solo lo invoca el
+             PendingIntent de la propia app, por eso no se exporta. -->
+        <receiver
+            android:name=".data.filesync.ReceptorWifi"
+            android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

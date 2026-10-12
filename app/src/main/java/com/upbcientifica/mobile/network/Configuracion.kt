@@ -125,11 +125,19 @@ object Configuracion {
         else "http://$hostDesarrollo:8082/"
 
     /**
-     * File Sync (node-sync), gRPC sobre TLS.
-     * Todavía sin usar: el cliente gRPC está desactivado en build.gradle.kts.
+     * File Sync (node-sync): gRPC, puerto 9090 (el del diagrama de despliegue).
+     * Formato host:puerto, sin esquema. En el PC lo arranca el script 7.
      */
     val direccionSync: String
         get() = if (enLaboratorio) "$HOST_SYNC_LAB:9090" else "$hostDesarrollo:9090"
+
+    /**
+     * gRPC sobre TLS en el laboratorio (como pide el diagrama); en el PC de
+     * desarrollo node-sync corre sin TLS. Si el certificado del laboratorio lo
+     * firma una CA propia, hay que instalar esa CA en el teléfono.
+     */
+    val SYNC_CON_TLS: Boolean
+        get() = enLaboratorio
 
     /**
      * Shared File Service (node-shared-file): el ejecutable `shared-file-svc`

@@ -1,10 +1,9 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // Plugin de protobuf/gRPC DESACTIVADO por ahora: se reactiva cuando Dev D
-    // entregue el .proto real de File Sync. Sin un .proto, este plugin hace
-    // fallar el build (task extractIncludeDebugProto).
-    // id("com.google.protobuf")
+    // Genera el cliente gRPC de File Sync desde src/main/proto/filesync.proto
+    // (copia del contrato de node-sync).
+    id("com.google.protobuf")
 }
 
 android {
@@ -63,11 +62,36 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 
-    // --- File Sync (gRPC) --- DESACTIVADO hasta tener el .proto de Dev D.
-    // implementation("io.grpc:grpc-kotlin-stub:1.4.1")
-    // implementation("io.grpc:grpc-okhttp:1.64.0")
-    // implementation("io.grpc:grpc-protobuf-lite:1.64.0")
+    // --- File Sync (gRPC con node-sync) ---
+    // okhttp es el transporte recomendado en Android; "lite" es la variante de
+    // protobuf para móviles (sin reflexión, mucho más pequeña).
+    implementation("io.grpc:grpc-okhttp:1.64.0")
+    implementation("io.grpc:grpc-protobuf-lite:1.64.0")
+    implementation("io.grpc:grpc-stub:1.64.0")
+    implementation("io.grpc:grpc-kotlin-stub:1.4.1")
+    implementation("com.google.protobuf:protobuf-javalite:3.25.3")
+    // Sincronización en segundo plano: al llegar al Wi-Fi y en horario programado.
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    // Recorrer la carpeta del teléfono elegida con el selector del sistema (SAF).
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     // Almacenamiento seguro del token de sesión
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+}
+
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:3.25.3" }
+    plugins {
+        create("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:1.64.0" }
+        create("grpckt") { artifact = "io.grpc:protoc-gen-grpc-kotlin:1.4.1:jdk8@jar" }
+    }
+    generateProtoTasks {
+        all().forEach { tarea ->
+            tarea.builtins { create("java") { option("lite") } }
+            tarea.plugins {
+                create("grpc") { option("lite") }
+                create("grpckt") { option("lite") }
+            }
+        }
+    }
 }

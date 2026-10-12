@@ -55,12 +55,20 @@ fun MainScreen(
     onCerrarSesion: () -> Unit
 ) {
     var pestana by rememberSaveable { mutableStateOf(Pestana.INICIO) }
+    var verSync by rememberSaveable { mutableStateOf(false) }
     val estadoSync by syncViewModel.estado.collectAsState()
 
+    // File Sync no tiene pestaña propia (con cinco ya va justa la barra): se
+    // abre desde su indicador, en todas las pestañas, y desde Inicio.
+    if (verSync) {
+        SyncScreen(syncViewModel, onVolver = { verSync = false })
+        return
+    }
+
     // Lo que va a la derecha de la barra superior en todas las pestañas:
-    // el estado de File Sync (solo informativo) y el avatar con la cuenta.
+    // el estado de File Sync (abre su pantalla) y el avatar con la cuenta.
     val accionesCuenta: @Composable () -> Unit = {
-        IndicadorSincronizacion(estadoSync)
+        IndicadorSincronizacion(estadoSync, onClick = { verSync = true })
         MenuCuenta(usuario, onCerrarSesion)
     }
 
@@ -105,6 +113,7 @@ fun MainScreen(
                         usuario = usuario,
                         estadoSync = estadoSync,
                         onNavigate = { pestana = it },
+                        onAbrirSync = { verSync = true },
                         accionesCuenta = accionesCuenta
                     )
                     Pestana.ARCHIVOS -> StorageScreen(storageViewModel, accionesCuenta)
