@@ -14,6 +14,19 @@
     - Los servicios reales del CCA deben exponerse por HTTPS.
 -->
 <network-security-config>
+    <!--
+        CA interna de UPB-CIENTIFICA: firma los certificados de node-soap
+        (HTTPS 8081) y node-sync (gRPC/TLS 9090) en las VPS. Sin ella Android
+        rechaza el login y la sincronización por "certificado desconocido".
+        Es pública (también en https://10.154.12.219/upbc-ca.crt).
+    -->
+    <base-config>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/upbc_ca" />
+        </trust-anchors>
+    </base-config>
+
     <domain-config cleartextTrafficPermitted="true">
         <!--
             Emulador de Android Studio: 10.0.2.2 es la dirección con la que el
@@ -32,10 +45,13 @@
         <domain includeSubdomains="true">192.168.137.1</domain>
 
         <!--
-            VMs del laboratorio / CCA.
-            TODO equipo: añadir el resto a medida que se desplieguen
-            (node-repository, node-media, node-sync).
+            VPS del laboratorio (servicios REST todavía en HTTP).
+            node-soap (10.154.12.219) va por HTTPS y no necesita estar aquí.
         -->
+        <domain includeSubdomains="true">10.154.12.221</domain> <!-- pasd_nodo2: Storage, Shared File -->
+        <domain includeSubdomains="true">10.154.12.222</domain> <!-- pasd_nodo3: Media, job-api -->
+
+        <!-- VM antigua del laboratorio (antes de las VPS). -->
         <domain includeSubdomains="true">192.168.1.195</domain>
     </domain-config>
 </network-security-config>

@@ -31,7 +31,7 @@ object Configuracion {
     }
 
     /** <<< CAMBIA ESTO según dónde estés ejecutando la app. */
-    val entorno: Entorno = Entorno.DISPOSITIVO_FISICO
+    val entorno: Entorno = Entorno.LABORATORIO
 
     /**
      * IP de tu PC en la red Wi-Fi, para cuando pruebas en un celular físico.
@@ -61,14 +61,21 @@ object Configuracion {
      */
     const val USAR_MOCK_AUTH = false
 
-    // --- Direcciones de las VMs del laboratorio -----------------------------
-    // TODO equipo: completar a medida que se desplieguen los servicios.
-    private const val HOST_SOAP_LAB = "192.168.1.195"
-    private const val HOST_STORAGE_LAB = "192.168.1.195"
-    private const val HOST_MEDIA_LAB = "192.168.1.195"
-    private const val HOST_SYNC_LAB = "192.168.1.195"
-    /** hpc-master: job-api corre junto al gestor del clúster. */
-    private const val HOST_HPC_LAB = "192.168.1.195"
+    // --- Direcciones de las VPS del laboratorio (2026-10-13) -----------------
+    // Solo se alcanzan desde la red cableada de la universidad: el celular
+    // llega por la zona con cobertura (hotspot) de un PC conectado por cable.
+    // node-soap (HTTPS) y node-sync (gRPC/TLS) usan certificados de la CA
+    // interna, que la app trae en res/raw/upbc_ca.crt.
+    /** pasd_nodo1: node-soap (8081) y node-web. */
+    private const val HOST_SOAP_LAB = "10.154.12.219"
+    /** pasd_nodo2: Storage (8084) y Shared File (8085). */
+    private const val HOST_STORAGE_LAB = "10.154.12.221"
+    /** pasd_nodo3: Photo Album + Streaming (8083). */
+    private const val HOST_MEDIA_LAB = "10.154.12.222"
+    /** pasd_nodo2: node-sync (9090). */
+    private const val HOST_SYNC_LAB = "10.154.12.221"
+    /** pasd_nodo3: job-api (8082) junto al gestor del clúster. */
+    private const val HOST_HPC_LAB = "10.154.12.222"
 
     /** Host del PC de desarrollo, visto desde el dispositivo. */
     private val hostDesarrollo: String
