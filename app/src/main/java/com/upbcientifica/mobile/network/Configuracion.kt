@@ -39,8 +39,12 @@ object Configuracion {
      * Ojo: tiene que ser la de la tarjeta Wi-Fi real. Las 192.168.56.x son las
      * virtuales de VirtualBox y el celular no las alcanza.
      * En Windows: `ipconfig` -> "Adaptador de LAN inalámbrica Wi-Fi".
+     *
+     * Si el PC va por cable y el celular está en otra red: activar la Zona con
+     * cobertura inalámbrica móvil de Windows, conectar el celular a ella y usar
+     * 192.168.137.1 (siempre es esa, "Conexión de área local* 2" en ipconfig).
      */
-    const val IP_PC_EN_WIFI = "192.168.20.31"
+    const val IP_PC_EN_WIFI = "192.168.137.1"
 
     /**
      * Autenticación contra el mock en vez del servicio real.

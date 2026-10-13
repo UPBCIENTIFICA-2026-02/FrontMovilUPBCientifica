@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-/** cluster es null cuando el servidor no informa el estado del clúster (ver HpcRepository). */
+/** cluster es null si /cluster/estado falló en esta consulta (los trabajos se muestran igual). */
 data class DatosHpc(val cluster: EstadoCluster?, val trabajos: List<TrabajoHpc>)
 
 class HpcViewModel(private val repo: HpcRepository) : ViewModel() {
@@ -35,10 +35,9 @@ class HpcViewModel(private val repo: HpcRepository) : ViewModel() {
             val primeraVez = _state.value !is UiState.Success
             if (primeraVez) _state.value = UiState.Loading
             try {
-                // coroutineScope: si una de las dos consultas falla, la
-                // excepción llega a este catch en vez de tumbar la app.
                 _state.value = UiState.Success(coroutineScope {
-                    val cluster = async { repo.estadoCluster() }
+                    // El estado del clúster es secundario: si falla, la lista sigue.
+                    val cluster = async { runCatching { repo.estadoCluster() }.getOrNull() }
                     val trabajos = async { repo.consultarTrabajos() }
                     DatosHpc(cluster.await(), trabajos.await())
                 })
@@ -53,13 +52,7 @@ class HpcViewModel(private val repo: HpcRepository) : ViewModel() {
     fun enviarTrabajo(solicitud: SolicitudTrabajo, onResultado: (Result<TrabajoHpc>) -> Unit) {
         viewModelScope.launch {
             _enviando.value = true
-            val resultado = try {
-                Result.success(repo.enviarTrabajo(solicitud))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
+            val resultado = resultadoDe { repo.enviarTrabajo(solicitud) }
             _enviando.value = false
             onResultado(resultado)
             actualizar()
@@ -68,15 +61,27 @@ class HpcViewModel(private val repo: HpcRepository) : ViewModel() {
 
     fun cancelarTrabajo(id: String, onResultado: (Result<Unit>) -> Unit) {
         viewModelScope.launch {
-            val resultado = try {
-                Result.success(repo.cancelarTrabajo(id))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-            onResultado(resultado)
+            onResultado(resultadoDe { repo.cancelarTrabajo(id) })
             actualizar()
         }
+    }
+
+    fun reintentarTrabajo(id: String, onResultado: (Result<Pair<String, String?>>) -> Unit) {
+        viewModelScope.launch {
+            onResultado(resultadoDe { repo.reintentarTrabajo(id) })
+            actualizar()
+        }
+    }
+
+    fun logs(id: String, onResultado: (Result<String>) -> Unit) {
+        viewModelScope.launch { onResultado(resultadoDe { repo.logs(id) }) }
+    }
+
+    private suspend fun <T> resultadoDe(bloque: suspend () -> T): Result<T> = try {
+        Result.success(bloque())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 }

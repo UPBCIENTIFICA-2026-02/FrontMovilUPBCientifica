@@ -15,11 +15,13 @@ import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.TimerOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.upbcientifica.mobile.data.hpc.EstadoCluster
@@ -50,7 +53,15 @@ private const val INTERVALO_CONSULTA_MS = 3_000L
 
 private enum class Filtro(val etiqueta: String) { TODOS("Todos"), ACTIVOS("Activos"), FINALIZADOS("Finalizados") }
 
-private val TrabajoHpc.activo get() = estado == EstadoTrabajo.EN_COLA || estado == EstadoTrabajo.EJECUTANDO
+private val PRIORIDADES = listOf("BAJA" to "Baja", "NORMAL" to "Normal", "ALTA" to "Alta")
+
+private val TrabajoHpc.activo
+    get() = estado == EstadoTrabajo.PENDIENTE || estado == EstadoTrabajo.EN_COLA ||
+        estado == EstadoTrabajo.EJECUTANDO || estado == EstadoTrabajo.GUARDANDO
+
+private val TrabajoHpc.reintentable get() = estado == EstadoTrabajo.FALLIDO || estado == EstadoTrabajo.FALLIDO_TIMEOUT
+
+private val TrabajoHpc.conLogs get() = estado != EstadoTrabajo.PENDIENTE && estado != EstadoTrabajo.EN_COLA
 
 /** job-api usa UUID: en pantalla basta con el principio, como un hash corto de git. */
 private val TrabajoHpc.idCorto get() = id.take(8)
@@ -60,10 +71,13 @@ private data class AspectoEstado(val etiqueta: String, val icono: ImageVector, v
 
 @Composable
 private fun aspecto(estado: EstadoTrabajo): AspectoEstado = when (estado) {
+    EstadoTrabajo.PENDIENTE -> AspectoEstado("Pendiente", Icons.Rounded.HourglassTop, MaterialTheme.colorScheme.tertiary)
     EstadoTrabajo.EN_COLA -> AspectoEstado("En cola", Icons.Rounded.HourglassTop, MaterialTheme.colorScheme.tertiary)
     EstadoTrabajo.EJECUTANDO -> AspectoEstado("Ejecutando", Icons.Rounded.Sync, MaterialTheme.colorScheme.primary)
+    EstadoTrabajo.GUARDANDO -> AspectoEstado("Guardando resultado", Icons.Rounded.CloudUpload, MaterialTheme.colorScheme.primary)
     EstadoTrabajo.COMPLETADO -> AspectoEstado("Completado", Icons.Rounded.CheckCircle, MaterialTheme.colorScheme.exito)
     EstadoTrabajo.FALLIDO -> AspectoEstado("Fallido", Icons.Rounded.Error, MaterialTheme.colorScheme.error)
+    EstadoTrabajo.FALLIDO_TIMEOUT -> AspectoEstado("Tiempo agotado", Icons.Rounded.TimerOff, MaterialTheme.colorScheme.error)
     EstadoTrabajo.CANCELADO -> AspectoEstado("Cancelado", Icons.Rounded.Block, MaterialTheme.colorScheme.outline)
 }
 
@@ -76,9 +90,11 @@ fun HpcScreen(viewModel: HpcViewModel, accionesCuenta: @Composable () -> Unit) {
     var filtro by rememberSaveable { mutableStateOf(Filtro.TODOS) }
     var formularioAbierto by rememberSaveable { mutableStateOf(false) }
     var detalle by remember { mutableStateOf<TrabajoHpc?>(null) }
+    var logs by remember { mutableStateOf<Pair<String, String?>?>(null) }  // (nombre, texto; null = cargando)
 
     val snackbar = remember { SnackbarHostState() }
     val alcance = rememberCoroutineScope()
+    fun avisar(texto: String) = alcance.launch { snackbar.showSnackbar(texto) }
 
     // Consulta periódica (ConsultarEstadoTrabajo / ObtenerEstadoCluster) solo
     // mientras la pestaña está en pantalla; se cancela sola al salir.
@@ -115,15 +131,19 @@ fun HpcScreen(viewModel: HpcViewModel, accionesCuenta: @Composable () -> Unit) {
                 is UiState.Error -> EstadoError(s.message, onReintentar = viewModel::actualizar)
                 is UiState.Success -> {
                     val q = consulta.trim()
-                    val visibles = s.data.trabajos
-                        .filter {
-                            when (filtro) {
-                                Filtro.TODOS -> true
-                                Filtro.ACTIVOS -> it.activo
-                                Filtro.FINALIZADOS -> !it.activo
-                            }
+                    val pasa = { t: TrabajoHpc, f: Filtro ->
+                        when (f) {
+                            Filtro.TODOS -> true
+                            Filtro.ACTIVOS -> t.activo
+                            Filtro.FINALIZADOS -> !t.activo
                         }
-                        .filter { it.nombre.contains(q, ignoreCase = true) || it.id.contains(q) }
+                    }
+                    val visibles = s.data.trabajos
+                        .filter { pasa(it, filtro) }
+                        .filter {
+                            it.nombre.contains(q, ignoreCase = true) || it.id.contains(q) ||
+                                it.rutaCodigo.contains(q, ignoreCase = true)
+                        }
 
                     LazyColumn(
                         Modifier.fillMaxSize(),
@@ -131,25 +151,15 @@ fun HpcScreen(viewModel: HpcViewModel, accionesCuenta: @Composable () -> Unit) {
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        item(key = "cluster") {
-                            val cluster = s.data.cluster
-                            if (cluster != null) TarjetaCluster(cluster) else TarjetaClusterSinEstado(s.data.trabajos)
-                        }
+                        item(key = "cluster") { TarjetaCluster(s.data.cluster) }
 
                         item(key = "filtros") {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(Filtro.entries) { opcion ->
-                                    val cuantos = s.data.trabajos.count {
-                                        when (opcion) {
-                                            Filtro.TODOS -> true
-                                            Filtro.ACTIVOS -> it.activo
-                                            Filtro.FINALIZADOS -> !it.activo
-                                        }
-                                    }
                                     FilterChip(
                                         selected = filtro == opcion,
                                         onClick = { filtro = opcion },
-                                        label = { Text("${opcion.etiqueta} · $cuantos") }
+                                        label = { Text("${opcion.etiqueta} · ${s.data.trabajos.count { pasa(it, opcion) }}") }
                                     )
                                 }
                             }
@@ -160,7 +170,7 @@ fun HpcScreen(viewModel: HpcViewModel, accionesCuenta: @Composable () -> Unit) {
                                 EstadoVacio(
                                     icono = if (q.isEmpty()) Icons.Outlined.Dns else Icons.Outlined.SearchOff,
                                     titulo = if (q.isEmpty()) "No hay trabajos aquí" else "Sin resultados",
-                                    mensaje = if (q.isEmpty()) "Envía un trabajo al clúster con \"Nuevo trabajo\"."
+                                    mensaje = if (q.isEmpty()) "Envía tu código y tus datos al clúster con \"Nuevo trabajo\"."
                                               else "Ningún trabajo coincide con \"$q\".",
                                     modifier = Modifier.height(320.dp)
                                 )
@@ -182,63 +192,101 @@ fun HpcScreen(viewModel: HpcViewModel, accionesCuenta: @Composable () -> Unit) {
             onCerrar = { formularioAbierto = false },
             onEnviar = { solicitud ->
                 viewModel.enviarTrabajo(solicitud) { resultado ->
-                    formularioAbierto = false
-                    alcance.launch {
-                        snackbar.showSnackbar(
-                            resultado.fold(
-                                onSuccess = { "Trabajo #${it.idCorto} enviado al clúster" },
-                                onFailure = { "No se pudo enviar: ${it.message}" }
-                            )
-                        )
-                    }
+                    resultado.fold(
+                        onSuccess = {
+                            formularioAbierto = false
+                            avisar("Trabajo #${it.idCorto} enviado al clúster")
+                        },
+                        // El formulario se queda abierto para corregir (p. ej. HPC-001: el código no existe).
+                        onFailure = { avisar("No se pudo enviar: ${it.message}") }
+                    )
                 }
             }
         )
     }
 
     detalle?.let { elegido ->
-        // Se busca la versión más reciente, para que el progreso siga avanzando con la hoja abierta.
+        // Se busca la versión más reciente, para que el estado siga avanzando con la hoja abierta.
         val trabajo = (state as? UiState.Success)?.data?.trabajos?.find { it.id == elegido.id } ?: elegido
         val a = aspecto(trabajo.estado)
-        val progreso = trabajo.progreso
         HojaDetalles(
             nombre = trabajo.nombre,
             tipo = TipoArchivo(a.etiqueta, a.icono, a.color),
             filas = buildList {
-                add("Estado" to if (trabajo.estado == EstadoTrabajo.EJECUTANDO && progreso != null)
-                    "${a.etiqueta} · ${(progreso * 100).roundToInt()} %" else a.etiqueta)
-                add("Comando" to trabajo.comando)
-                add("Prioridad" to "${trabajo.prioridad} de 10")
-                trabajo.recursos?.let { r ->
-                    add("Recursos" to "${r.nodos} nodos × ${r.cpusPorNodo} CPU · ${r.memoriaGb} GB RAM")
-                    add("Tiempo máximo" to formatearMinutos(r.tiempoMaximoMin))
+                add("Estado" to if (trabajo.estado == EstadoTrabajo.EN_COLA && trabajo.posicionCola > 0)
+                    "${a.etiqueta} · posición ${trabajo.posicionCola}" else a.etiqueta)
+                add("Código" to trabajo.rutaCodigo)
+                add("Dataset" to (trabajo.rutaDataset ?: "—"))
+                add("Recursos" to "${trabajo.procesos} procesos MPI · máximo ${formatearMinutos((trabajo.tiempoMaximoS / 60).coerceAtLeast(1))}" +
+                    " · prioridad ${trabajo.prioridad.lowercase()}")
+                if (trabajo.nodos.isNotEmpty()) add("Nodos" to trabajo.nodos.joinToString(", "))
+                trabajo.rutaResultado?.let { add("Resultado en tu Home" to it + if (trabajo.incompleto) " (incompleto)" else "") }
+                trabajo.mensajeError?.takeIf { it.isNotBlank() }?.let {
+                    add((if (trabajo.estado == EstadoTrabajo.COMPLETADO) "Nota" else "Detalle") to it)
                 }
-                trabajo.resultado?.takeIf { it.isNotBlank() }?.let { add("Salida" to it) }
-                trabajo.mensajeError?.takeIf { it.isNotBlank() }?.let { add("Error" to it) }
                 add("Enviado" to formatearHace(trabajo.enviadoEn))
                 add("Identificador" to trabajo.id)
             },
             onCerrar = { detalle = null },
-            acciones = if (!trabajo.activo) null else {
+            acciones = if (!trabajo.conLogs && !trabajo.activo) null else {
                 {
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.cancelarTrabajo(trabajo.id) { resultado ->
-                                detalle = null
-                                alcance.launch {
-                                    snackbar.showSnackbar(
-                                        resultado.fold(
-                                            onSuccess = { "Trabajo #${trabajo.idCorto} cancelado" },
-                                            onFailure = { "No se pudo cancelar: ${it.message}" }
-                                        )
-                                    )
+                    if (trabajo.conLogs) {
+                        OutlinedButton(
+                            onClick = {
+                                logs = trabajo.nombre to null
+                                viewModel.logs(trabajo.id) { r ->
+                                    logs = trabajo.nombre to r.fold({ it.ifBlank { "(sin salida)" } }, { "No se pudieron leer: ${it.message}" })
                                 }
-                            }
-                        },
-                        shape = CircleShape,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Cancelar trabajo") }
+                            },
+                            shape = CircleShape,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Ver registros") }
+                    }
+                    if (trabajo.reintentable) {
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                viewModel.reintentarTrabajo(trabajo.id) { r ->
+                                    detalle = null
+                                    avisar(r.fold({ "Reintento #${it.first.take(8)} enviado. ${it.second.orEmpty()}" },
+                                        { "No se pudo reintentar: ${it.message}" }))
+                                }
+                            },
+                            shape = CircleShape,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Reintentar") }
+                    }
+                    if (trabajo.activo) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.cancelarTrabajo(trabajo.id) { r ->
+                                    detalle = null
+                                    avisar(r.fold({ "Trabajo #${trabajo.idCorto} cancelado" }, { "No se pudo cancelar: ${it.message}" }))
+                                }
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Cancelar trabajo") }
+                    }
+                }
+            }
+        )
+    }
+
+    logs?.let { (nombre, texto) ->
+        AlertDialog(
+            onDismissRequest = { logs = null },
+            confirmButton = { TextButton(onClick = { logs = null }) { Text("Cerrar") } },
+            title = { Text("Registros · $nombre", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            text = {
+                if (texto == null) {
+                    CircularProgressIndicator()
+                } else {
+                    Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                        Text(texto, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                    }
                 }
             }
         )
@@ -246,62 +294,7 @@ fun HpcScreen(viewModel: HpcViewModel, accionesCuenta: @Composable () -> Unit) {
 }
 
 @Composable
-private fun TarjetaCluster(cluster: EstadoCluster) {
-    ElevatedCard(
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Rounded.Memory,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Clúster UPB", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "${cluster.nodosActivos} de ${cluster.nodosTotales} nodos en uso",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                // Punto verde + "En línea", como el estado de un servicio.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.exito))
-                    Spacer(Modifier.width(6.dp))
-                    Text("En línea", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.exito)
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-            Medidor("CPU", cluster.usoCpu)
-            Spacer(Modifier.height(12.dp))
-            Medidor("GPU", cluster.usoGpu)
-            Spacer(Modifier.height(20.dp))
-
-            Row(Modifier.fillMaxWidth()) {
-                Cifra("Nodos activos", "${cluster.nodosActivos}/${cluster.nodosTotales}", Modifier.weight(1f))
-                Cifra("En cola", cluster.trabajosEnCola.toString(), Modifier.weight(1f))
-                Cifra("Libres", (cluster.nodosTotales - cluster.nodosActivos).toString(), Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-/**
- * El servidor real (job-api) no informa todavía el estado del clúster
- * (Contrato_HPC: GET /cluster/estado). En vez de inventar cifras se muestra
- * lo que sí se sabe: cómo van los trabajos propios.
- */
-@Composable
-private fun TarjetaClusterSinEstado(trabajos: List<TrabajoHpc>) {
+private fun TarjetaCluster(cluster: EstadoCluster?) {
     ElevatedCard(
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
@@ -316,41 +309,62 @@ private fun TarjetaClusterSinEstado(trabajos: List<TrabajoHpc>) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Clúster UPB", style = MaterialTheme.typography.titleMedium)
+                    Text("Clúster UPB · malla Grid", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "El servidor aún no informa la carga de los nodos",
+                        cluster?.let { "${it.procesosEnUso} de ${it.procesosTotales} procesos en uso · ${it.nodosTotales} nodos" }
+                            ?: "No se pudo consultar el estado del clúster",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                if (cluster != null) {
+                    val (texto, color) = when {
+                        !cluster.ejecutorConectado -> "Sin job-runner" to MaterialTheme.colorScheme.error
+                        cluster.nodosEnFalla > 0 -> "${cluster.nodosEnFalla} en falla" to MaterialTheme.colorScheme.tertiary
+                        else -> "En línea" to MaterialTheme.colorScheme.exito
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+                        Spacer(Modifier.width(6.dp))
+                        Text(texto, style = MaterialTheme.typography.labelMedium, color = color)
+                    }
+                }
             }
+            if (cluster == null) return@Column
+
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth()) {
-                Cifra("Ejecutando", trabajos.count { it.estado == EstadoTrabajo.EJECUTANDO }.toString(), Modifier.weight(1f))
-                Cifra("En cola", trabajos.count { it.estado == EstadoTrabajo.EN_COLA }.toString(), Modifier.weight(1f))
-                Cifra("Terminados", trabajos.count { !it.activo }.toString(), Modifier.weight(1f))
+                Text("Procesos MPI en uso", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                Text(
+                    "${(cluster.uso * 100).roundToInt()} %",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { cluster.uso },
+                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
+            Spacer(Modifier.height(20.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Cifra("Nodos disponibles", "${cluster.nodosDisponibles}/${cluster.nodosTotales}", Modifier.weight(1f))
+                Cifra("En cola", cluster.trabajosEnCola.toString(), Modifier.weight(1f))
+                Cifra("Ejecutando", cluster.trabajosEjecutando.toString(), Modifier.weight(1f))
+            }
+            if (cluster.nodos.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    cluster.nodos.joinToString("  ·  ") {
+                        "${it.id}: ${it.carga}/${it.capacidad}" + (if (it.externo) " externo" else "") +
+                            (if (it.estado == "EN_FALLA") " en falla" else "")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun Medidor(etiqueta: String, valor: Float) {
-    Column {
-        Row(Modifier.fillMaxWidth()) {
-            Text(etiqueta, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-            Text(
-                "${(valor * 100).roundToInt()} %",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        LinearProgressIndicator(
-            progress = { valor },
-            modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
-            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        )
     }
 }
 
@@ -376,12 +390,7 @@ private fun TarjetaTrabajo(trabajo: TrabajoHpc, onClick: () -> Unit) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        trabajo.nombre,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Text(trabajo.nombre, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         "#${trabajo.idCorto} · ${formatearHace(trabajo.enviadoEn)}",
                         style = MaterialTheme.typography.bodySmall,
@@ -399,24 +408,8 @@ private fun TarjetaTrabajo(trabajo: TrabajoHpc, onClick: () -> Unit) {
                 }
             }
 
-            val progreso = trabajo.progreso
-            if (trabajo.estado == EstadoTrabajo.EJECUTANDO && progreso != null) {
-                Spacer(Modifier.height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LinearProgressIndicator(
-                        progress = { progreso },
-                        modifier = Modifier.weight(1f).height(6.dp).clip(CircleShape),
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "${(progreso * 100).roundToInt()} %",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else if (trabajo.activo) {
-                // En cola, o ejecutando sin porcentaje conocido (job-api no lo informa).
+            if (trabajo.activo) {
+                // OpenMPI no informa el porcentaje de avance: barra indeterminada.
                 Spacer(Modifier.height(14.dp))
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
@@ -427,23 +420,30 @@ private fun TarjetaTrabajo(trabajo: TrabajoHpc, onClick: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
             Text(
-                trabajo.comando,
+                trabajo.rutaCodigo + (trabajo.rutaDataset?.let { " · $it" } ?: ""),
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                trabajo.recursos?.let { "${it.nodos} nodos · ${it.nodos * it.cpusPorNodo} CPU · ${it.memoriaGb} GB" }
-                    ?: "Prioridad ${trabajo.prioridad}",
+                buildList {
+                    add("${trabajo.procesos} procesos")
+                    add("prioridad ${trabajo.prioridad.lowercase()}")
+                    if (trabajo.estado == EstadoTrabajo.EJECUTANDO && trabajo.nodos.isNotEmpty()) add("en ${trabajo.nodos.joinToString(", ")}")
+                    trabajo.rutaResultado?.let { add("resultado: $it") }
+                }.joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            trabajo.mensajeError?.takeIf { it.isNotBlank() && trabajo.estado != EstadoTrabajo.COMPLETADO }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HojaNuevoTrabajo(
     enviando: Boolean,
@@ -451,10 +451,15 @@ private fun HojaNuevoTrabajo(
     onEnviar: (SolicitudTrabajo) -> Unit
 ) {
     var nombre by rememberSaveable { mutableStateOf("") }
-    var comando by rememberSaveable { mutableStateOf("") }
-    var prioridad by rememberSaveable { mutableIntStateOf(5) }
+    var codigo by rememberSaveable { mutableStateOf("") }
+    var dataset by rememberSaveable { mutableStateOf("") }
+    var procesos by rememberSaveable { mutableIntStateOf(4) }
+    var minutos by rememberSaveable { mutableStateOf("10") }
+    var prioridad by rememberSaveable { mutableStateOf("NORMAL") }
+    var parametros by rememberSaveable { mutableStateOf("") }
 
-    val valido = nombre.isNotBlank() && comando.isNotBlank()
+    val minutosValidos = minutos.toIntOrNull()?.takeIf { it >= 1 }
+    val valido = nombre.isNotBlank() && codigo.isNotBlank() && minutosValidos != null
 
     ModalBottomSheet(
         onDismissRequest = { if (!enviando) onCerrar() },
@@ -470,57 +475,68 @@ private fun HojaNuevoTrabajo(
         ) {
             Text("Nuevo trabajo", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Se enviará a la cola del clúster UPB",
+                "Tu código se compila y se ejecuta con MPI en el clúster. El resultado queda en \"Resultados HPC\" de tu Home.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(20.dp))
 
             OutlinedTextField(
-                value = nombre,
-                onValueChange = { nombre = it },
-                label = { Text("Nombre del trabajo") },
-                placeholder = { Text("Simulación de fluidos") },
-                singleLine = true,
-                enabled = !enviando,
-                shape = MaterialTheme.shapes.small,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Next
-                ),
+                value = nombre, onValueChange = { nombre = it },
+                label = { Text("Nombre del trabajo") }, placeholder = { Text("Simulación de fluidos") },
+                singleLine = true, enabled = !enviando, shape = MaterialTheme.shapes.small,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(12.dp))
+            CampoRuta("Código fuente", codigo, { codigo = it }, "/Proyectos/simulacion.c",
+                "Ruta en tu Home: .c, .cpp o .py (mpi4py)", !enviando)
+            Spacer(Modifier.height(12.dp))
+            CampoRuta("Dataset (opcional)", dataset, { dataset = it }, "/Proyectos/datos.csv",
+                "Ruta en tu Home; se pasa al programa como primer argumento", !enviando)
+
+            Spacer(Modifier.height(20.dp))
+            Contador("Procesos MPI", procesos, rango = 1..64, habilitado = !enviando, onCambio = { procesos = it })
+            Spacer(Modifier.height(12.dp))
             OutlinedTextField(
-                value = comando,
-                onValueChange = { comando = it },
-                label = { Text("Comando") },
-                placeholder = { Text("mpirun -np 4 ./simulacion") },
-                supportingText = { Text("Se ejecuta tal cual en el clúster") },
-                singleLine = true,
-                enabled = !enviando,
-                shape = MaterialTheme.shapes.small,
-                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.None,
-                    autoCorrect = false,
-                    imeAction = ImeAction.Done
-                ),
+                value = minutos, onValueChange = { minutos = it.filter(Char::isDigit).take(5) },
+                label = { Text("Tiempo máximo (minutos)") }, singleLine = true, enabled = !enviando,
+                isError = minutosValidos == null, shape = MaterialTheme.shapes.small,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(20.dp))
-            Contador("Prioridad", prioridad, rango = 1..10, habilitado = !enviando, onCambio = { prioridad = it })
+            Spacer(Modifier.height(16.dp))
+            Text("Prioridad", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PRIORIDADES.forEach { (valor, texto) ->
+                    FilterChip(selected = prioridad == valor, onClick = { prioridad = valor }, enabled = !enviando,
+                        label = { Text(texto) })
+                }
+            }
             Text(
-                "1 es la más baja y 10 la más alta: el gestor atiende primero los de mayor prioridad.",
+                "Alta requiere el permiso de administración del clúster.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = parametros, onValueChange = { parametros = it },
+                label = { Text("Parámetros (opcional)") }, placeholder = { Text("iteraciones=1000, tolerancia=0.01") },
+                singleLine = true, enabled = !enviando, shape = MaterialTheme.shapes.small,
+                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false, imeAction = ImeAction.Done),
+                modifier = Modifier.fillMaxWidth()
             )
 
             Spacer(Modifier.height(24.dp))
             Button(
                 onClick = {
-                    onEnviar(SolicitudTrabajo(nombre.trim(), comando.trim(), prioridad))
+                    val params = parametros.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        .associate { p -> p.substringBefore("=").trim() to p.substringAfter("=", "").trim() }
+                    onEnviar(SolicitudTrabajo(nombre.trim(), codigo.trim(), dataset.trim().ifBlank { null },
+                        procesos, (minutosValidos ?: 1) * 60, prioridad, params))
                 },
                 enabled = valido && !enviando,
                 shape = CircleShape,
@@ -540,6 +556,18 @@ private fun HojaNuevoTrabajo(
             }
         }
     }
+}
+
+@Composable
+private fun CampoRuta(etiqueta: String, valor: String, onCambio: (String) -> Unit, ejemplo: String, ayuda: String, habilitado: Boolean) {
+    OutlinedTextField(
+        value = valor, onValueChange = onCambio,
+        label = { Text(etiqueta) }, placeholder = { Text(ejemplo) }, supportingText = { Text(ayuda) },
+        singleLine = true, enabled = habilitado, shape = MaterialTheme.shapes.small,
+        textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrect = false, imeAction = ImeAction.Next),
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 @Composable

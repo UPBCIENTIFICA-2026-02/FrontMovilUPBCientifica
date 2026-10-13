@@ -9,72 +9,80 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
-import kotlin.math.sin
 import kotlin.random.Random
 
-enum class EstadoTrabajo { EN_COLA, EJECUTANDO, COMPLETADO, FALLIDO, CANCELADO }
+/** Estados de Contrato_HPC. GUARDANDO = COMPLETADO_PENDIENTE_ALMACENAMIENTO. */
+enum class EstadoTrabajo { PENDIENTE, EN_COLA, EJECUTANDO, GUARDANDO, COMPLETADO, FALLIDO, FALLIDO_TIMEOUT, CANCELADO }
 
 data class TrabajoHpc(
     val id: String,
     val nombre: String,
-    val comando: String,
-    val prioridad: Int,
+    /** Código fuente en el Home ("/Proyectos/pi.c"). */
+    val rutaCodigo: String,
+    val rutaDataset: String?,
+    val procesos: Int,
+    val tiempoMaximoS: Int,
+    /** BAJA, NORMAL o ALTA. */
+    val prioridad: String,
     val estado: EstadoTrabajo,
-    /**
-     * 0..1 en EJECUTANDO. null si el servidor no lo informa: job-api no da
-     * porcentaje de avance, y la pantalla muestra entonces una barra indeterminada.
-     */
-    val progreso: Float?,
     val enviadoEn: Long,
-    /** Salida del comando (solo COMPLETADO). */
-    val resultado: String? = null,
-    /** Motivo del fallo (solo FALLIDO). */
+    val posicionCola: Int = 0,
+    val nodos: List<String> = emptyList(),
+    /** Carpeta del Home con la salida ("/Resultados HPC/pi-1a2b3c4d"). */
+    val rutaResultado: String? = null,
+    /** Salida parcial de un FALLIDO_TIMEOUT. */
+    val incompleto: Boolean = false,
     val mensajeError: String? = null,
-    /** Recursos pedidos. Solo los tiene el simulador: job-api no los recibe. */
-    val recursos: RecursosTrabajo? = null,
+    val originalId: String? = null,
 )
 
-data class RecursosTrabajo(val nodos: Int, val cpusPorNodo: Int, val memoriaGb: Int, val tiempoMaximoMin: Int)
+data class NodoCluster(val id: String, val estado: String, val capacidad: Int, val carga: Int, val externo: Boolean)
 
 data class EstadoCluster(
-    val nodosActivos: Int,
     val nodosTotales: Int,
-    /** 0..1 */
-    val usoCpu: Float,
-    /** 0..1 */
-    val usoGpu: Float,
+    val nodosDisponibles: Int,
+    val nodosEnFalla: Int,
+    val procesosTotales: Int,
+    val procesosEnUso: Int,
     val trabajosEnCola: Int,
-)
+    val trabajosEjecutando: Int,
+    /** job-runner (hpc-master) responde. Sin él los trabajos esperan en cola. */
+    val ejecutorConectado: Boolean,
+    val nodos: List<NodoCluster>,
+) {
+    val uso: Float get() = if (procesosTotales == 0) 0f else procesosEnUso / procesosTotales.toFloat()
+}
 
-/** Lo que pide job-api para encolar un trabajo (SubmitJobRequest.java). */
+/** EnviarTrabajo (Contrato_HPC §3.1): código y dataset del Home, procesos, tiempo y prioridad. */
 data class SolicitudTrabajo(
     val nombre: String,
-    val comando: String,
-    /** 1 (baja) a 10 (alta). */
-    val prioridad: Int,
+    val rutaCodigo: String,
+    val rutaDataset: String?,
+    val procesos: Int,
+    val tiempoMaximoS: Int,
+    val prioridad: String,
+    val parametros: Map<String, String> = emptyMap(),
 )
 
 /**
  * HPC Service.
  *
- * Con [api] habla con job-api por REST (ver [HpcApi]): enviar, listar y
- * cancelar son reales y los ejecuta el gestor del clúster.
+ * Con [api] habla con job-api por REST (ver [HpcApi]). El trabajo es código
+ * fuente y dataset del Home: el gestor los valida contra Storage, los ejecuta
+ * con mpirun en el clúster y deja el resultado en "Resultados HPC/" del Home.
  *
  * Sin [api] SIMULA las operaciones con la misma forma, para trabajar la
- * interfaz sin backend: el estado se deduce del tiempo transcurrido desde el
- * envío (en cola unos segundos, luego ejecutando, luego terminado).
- *
- * El estado del clúster ([estadoCluster]) solo existe en el simulador: job-api
- * todavía no expone `GET /cluster/estado` (Contrato_HPC). Con el backend real
- * devuelve null y la pantalla lo dice en vez de inventar cifras.
+ * interfaz sin backend.
  */
 class HpcRepository(private val api: HpcApi? = null) {
 
-    suspend fun enviarTrabajo(solicitud: SolicitudTrabajo): TrabajoHpc {
-        if (api == null) return simulador.enviar(solicitud)
+    suspend fun enviarTrabajo(s: SolicitudTrabajo): TrabajoHpc {
+        if (api == null) return simulador.enviar(s)
         return llamar {
-            val creado = api.enviarTrabajo(EnviarTrabajoDto(solicitud.nombre, solicitud.comando, solicitud.prioridad))
-            api.obtenerTrabajo(creado.id).aModelo()
+            val creado = api.enviarTrabajo(EnviarTrabajoDto(
+                s.nombre, s.rutaCodigo, s.rutaDataset?.takeIf { it.isNotBlank() }, s.procesos,
+                s.tiempoMaximoS, s.prioridad, s.parametros))
+            api.obtenerTrabajo(creado.trabajoId.orEmpty()).aModelo()
         }
     }
 
@@ -89,26 +97,49 @@ class HpcRepository(private val api: HpcApi? = null) {
         llamar { api.cancelarTrabajo(id) }
     }
 
-    suspend fun estadoCluster(): EstadoCluster? {
+    /** Devuelve el id del trabajo nuevo y la advertencia del contrato (usa el código ACTUAL). */
+    suspend fun reintentarTrabajo(id: String): Pair<String, String?> {
+        if (api == null) return simulador.reintentar(id)
+        return llamar { api.reintentarTrabajo(id, emptyMap()).let { it.trabajoId.orEmpty() to it.advertencia } }
+    }
+
+    suspend fun logs(id: String): String {
+        if (api == null) return "=== salida estándar ===\nrango 0/4: listo\nrango 1/4: listo\n"
+        return llamar { api.logsTrabajo(id).logsEjecucion.orEmpty() }
+    }
+
+    suspend fun estadoCluster(): EstadoCluster {
         if (api == null) return simulador.estadoCluster()
-        return null
+        return llamar {
+            val c = api.estadoCluster()
+            EstadoCluster(
+                nodosTotales = c.nodosTotales ?: 0, nodosDisponibles = c.nodosDisponibles ?: 0,
+                nodosEnFalla = c.nodosEnFalla ?: 0, procesosTotales = c.procesosTotales ?: 0,
+                procesosEnUso = c.procesosEnUso ?: 0, trabajosEnCola = c.trabajosEnCola ?: 0,
+                trabajosEjecutando = c.trabajosEjecutando ?: 0, ejecutorConectado = c.ejecutorConectado == true,
+                nodos = c.nodos.orEmpty().map {
+                    NodoCluster(it.id.orEmpty(), it.estado.orEmpty(), it.capacidadProcesos ?: 0,
+                        it.cargaActual ?: 0, it.origen == "EXTERNO")
+                }
+            )
+        }
     }
 
     /**
      * Convierte los errores de red en mensajes que se pueden mostrar tal cual.
-     * job-api responde `{ status, error, mensaje }`; sin esto el usuario vería
-     * "HTTP 503" en vez de "El servicio gestor-cluster no está disponible...".
+     * job-api responde `{ status, error, codigo, mensaje }` (codigo = HPC-xxx).
      */
     private suspend fun <T> llamar(bloque: suspend () -> T): T = try {
         bloque()
     } catch (e: HttpException) {
-        val mensaje = runCatching {
-            JSONObject(e.response()?.errorBody()?.string().orEmpty()).optString("mensaje")
-        }.getOrNull()
+        val cuerpo = runCatching { JSONObject(e.response()?.errorBody()?.string().orEmpty()) }.getOrNull()
+        val mensaje = cuerpo?.optString("mensaje")
+        val codigo = cuerpo?.optString("codigo")?.takeIf { it.isNotBlank() && it != "null" }
         throw IllegalStateException(
             when {
-                !mensaje.isNullOrBlank() -> mensaje
+                !mensaje.isNullOrBlank() -> if (codigo != null) "$mensaje ($codigo)" else mensaje
                 e.code() == 401 -> "La sesión no es válida. Vuelve a iniciar sesión."
+                e.code() == 403 -> "Tu perfil no tiene acceso al servicio HPC."
                 else -> "El servicio HPC respondió ${e.code()}"
             }
         )
@@ -118,20 +149,29 @@ class HpcRepository(private val api: HpcApi? = null) {
 
     private fun TrabajoDto.aModelo() = TrabajoHpc(
         id = id,
-        nombre = nombre,
-        comando = comando,
-        prioridad = prioridad,
+        nombre = nombreTrabajo.orEmpty(),
+        rutaCodigo = rutaCodigo.orEmpty(),
+        rutaDataset = rutaDataset,
+        procesos = numeroProcesos ?: 1,
+        tiempoMaximoS = tiempoMaximoEjecucion ?: 0,
+        prioridad = prioridad ?: "NORMAL",
         estado = when (estado) {
-            "QUEUED" -> EstadoTrabajo.EN_COLA
-            "RUNNING" -> EstadoTrabajo.EJECUTANDO
-            "COMPLETED" -> EstadoTrabajo.COMPLETADO
-            "CANCELLED" -> EstadoTrabajo.CANCELADO
+            "PENDIENTE" -> EstadoTrabajo.PENDIENTE
+            "EN_COLA" -> EstadoTrabajo.EN_COLA
+            "EJECUTANDO" -> EstadoTrabajo.EJECUTANDO
+            "COMPLETADO_PENDIENTE_ALMACENAMIENTO" -> EstadoTrabajo.GUARDANDO
+            "COMPLETADO" -> EstadoTrabajo.COMPLETADO
+            "FALLIDO_TIMEOUT" -> EstadoTrabajo.FALLIDO_TIMEOUT
+            "CANCELADO" -> EstadoTrabajo.CANCELADO
             else -> EstadoTrabajo.FALLIDO
         },
-        progreso = null,
-        enviadoEn = fechaCreacion?.let(::leerFechaIso) ?: 0L,
-        resultado = resultado,
+        enviadoEn = fechaEnvio?.let(::leerFechaIso) ?: 0L,
+        posicionCola = posicionCola ?: 0,
+        nodos = nodosAsignados.orEmpty(),
+        rutaResultado = rutaResultado,
+        incompleto = resultadoIncompleto == true,
         mensajeError = mensajeError,
+        originalId = trabajoOriginalId,
     )
 
     private val simulador = Simulador()
@@ -155,15 +195,11 @@ class HpcRepository(private val api: HpcApi? = null) {
 /** Trabajos y clúster de mentira, para usar la pantalla sin backend. */
 private class Simulador {
 
-    /** Un trabajo simulado: lo pedido más el guion de cómo va a evolucionar. */
     private data class Registro(
-        val id: String,
-        val solicitud: SolicitudTrabajo,
-        val recursos: RecursosTrabajo,
-        val enviadoEn: Long,
-        val esperaEnColaMs: Long,
+        val trabajo: TrabajoHpc,
+        val esperaMs: Long,
         val duracionMs: Long,
-        val falla: Boolean,
+        val falla: Boolean = false,
         val cancelado: Boolean = false,
     )
 
@@ -171,88 +207,75 @@ private class Simulador {
     private var siguienteId = 1043
     private val registros = mutableListOf<Registro>().apply {
         val ahora = System.currentTimeMillis()
-        add(Registro("1039", SolicitudTrabajo("Dinámica molecular · proteína 4HHB", "gromacs mdrun -deffnm md_4hhb", 7),
-            RecursosTrabajo(4, 32, 64, 240), ahora - 3 * HORA, 20_000, 2 * HORA, false))
-        add(Registro("1040", SolicitudTrabajo("Entrenamiento CNN · imágenes satelitales", "python train.py --epochs 50 --gpu", 5),
-            RecursosTrabajo(2, 16, 32, 120), ahora - HORA, 10_000, 25 * MIN, true))
-        add(Registro("1041", SolicitudTrabajo("Simulación CFD · túnel de viento", "mpirun -np 64 ./openfoam_run.sh", 8),
-            RecursosTrabajo(2, 32, 64, 180), ahora - 40_000, 5_000, 150_000, false))
-        add(Registro("1042", SolicitudTrabajo("Análisis genómico · lote 12", "snakemake --cores 16 -s pipeline.smk", 3),
-            RecursosTrabajo(1, 16, 32, 60), ahora - 2_000, 25_000, 90_000, false))
+        add(Registro(nuevo("Dinámica molecular · 4HHB", "/Proyectos/md.c", "/Datos/4hhb.pdb", 8, ahora - 3 * HORA), 20_000, 2 * HORA))
+        add(Registro(nuevo("Monte Carlo · π", "/Proyectos/pi.c", null, 4, ahora - HORA), 10_000, 10 * MIN, falla = true))
+        add(Registro(nuevo("Simulación CFD · túnel de viento", "/Proyectos/cfd.cpp", "/Datos/malla.dat", 8, ahora - 40_000), 5_000, 150_000))
+        add(Registro(nuevo("Análisis genómico · lote 12", "/Proyectos/genoma.py", "/Datos/lote12.csv", 4, ahora - 2_000), 25_000, 90_000))
     }
 
-    suspend fun enviar(solicitud: SolicitudTrabajo): TrabajoHpc {
+    private fun nuevo(nombre: String, codigo: String, dataset: String?, procesos: Int, enviado: Long, prioridad: String = "NORMAL") =
+        TrabajoHpc((siguienteId++).toString() + "-demo", nombre, codigo, dataset, procesos, 3600, prioridad, EstadoTrabajo.EN_COLA, enviado)
+
+    suspend fun enviar(s: SolicitudTrabajo): TrabajoHpc {
         delay(700) // latencia de red simulada
-        val registro = mutex.withLock {
-            Registro(
-                id = (siguienteId++).toString(),
-                solicitud = solicitud,
-                recursos = RecursosTrabajo(1, 16, 32, 60),
-                enviadoEn = System.currentTimeMillis(),
-                esperaEnColaMs = Random.nextLong(5_000, 12_000),
-                duracionMs = Random.nextLong(45_000, 90_000),
-                falla = false,
-            ).also { registros.add(it) }
+        val r = mutex.withLock {
+            Registro(nuevo(s.nombre, s.rutaCodigo, s.rutaDataset, s.procesos, System.currentTimeMillis(), s.prioridad),
+                Random.nextLong(5_000, 12_000), Random.nextLong(45_000, 90_000)).also { registros.add(it) }
         }
-        return registro.aTrabajo(System.currentTimeMillis())
+        return r.avanzar(System.currentTimeMillis())
     }
 
     suspend fun trabajos(): List<TrabajoHpc> {
         delay(250)
         val ahora = System.currentTimeMillis()
-        return mutex.withLock { registros.map { it.aTrabajo(ahora) } }.sortedByDescending { it.enviadoEn }
+        return mutex.withLock { registros.map { it.avanzar(ahora) } }.sortedByDescending { it.enviadoEn }
     }
 
     suspend fun cancelar(id: String) {
         delay(300)
         mutex.withLock {
-            val i = registros.indexOfFirst { it.id == id }
+            val i = registros.indexOfFirst { it.trabajo.id == id }
             if (i >= 0) registros[i] = registros[i].copy(cancelado = true)
+        }
+    }
+
+    suspend fun reintentar(id: String): Pair<String, String?> {
+        delay(300)
+        return mutex.withLock {
+            val o = registros.first { it.trabajo.id == id }.trabajo
+            val t = nuevo(o.nombre, o.rutaCodigo, o.rutaDataset, o.procesos, System.currentTimeMillis(), o.prioridad)
+                .copy(originalId = o.id)
+            registros.add(Registro(t, 4_000, 40_000))
+            t.id to "El reintento usa la versión actual del código."
         }
     }
 
     suspend fun estadoCluster(): EstadoCluster {
         val trabajos = trabajos()
-        val propios = trabajos.filter { it.estado == EstadoTrabajo.EJECUTANDO }.sumOf { it.recursos?.nodos ?: 0 }
-        // Carga de otros usuarios del clúster, oscilando suavemente.
-        val t = System.currentTimeMillis() / 20_000.0
-        val ajenos = (7 + 2 * sin(t)).toInt()
-        val activos = (propios + ajenos).coerceAtMost(NODOS_TOTALES)
-        return EstadoCluster(
-            nodosActivos = activos,
-            nodosTotales = NODOS_TOTALES,
-            usoCpu = (activos / NODOS_TOTALES.toFloat() * 0.92f).coerceIn(0f, 1f),
-            usoGpu = (0.45f + 0.2f * sin(t * 1.7).toFloat()).coerceIn(0f, 1f),
-            trabajosEnCola = 3 + trabajos.count { it.estado == EstadoTrabajo.EN_COLA },
-        )
+        val enUso = trabajos.filter { it.estado == EstadoTrabajo.EJECUTANDO }.sumOf { it.procesos }.coerceAtMost(PROCESOS)
+        val nodos = (1..4).map { i ->
+            val carga = (enUso - (i - 1) * 4).coerceIn(0, 4)
+            NodoCluster("hpc-worker$i", if (carga >= 4) "OCUPADO" else "DISPONIBLE", 4, carga, false)
+        }
+        return EstadoCluster(4, nodos.count { it.estado == "DISPONIBLE" }, 0, PROCESOS, enUso,
+            trabajos.count { it.estado == EstadoTrabajo.EN_COLA }, trabajos.count { it.estado == EstadoTrabajo.EJECUTANDO },
+            true, nodos)
     }
 
-    private fun Registro.aTrabajo(ahora: Long): TrabajoHpc {
-        val transcurrido = ahora - enviadoEn
-        val enEjecucion = transcurrido - esperaEnColaMs
-        val (estado, progreso) = when {
-            cancelado -> EstadoTrabajo.CANCELADO to 0f
-            enEjecucion < 0 -> EstadoTrabajo.EN_COLA to 0f
-            enEjecucion < duracionMs -> EstadoTrabajo.EJECUTANDO to enEjecucion / duracionMs.toFloat()
-            falla -> EstadoTrabajo.FALLIDO to 1f
-            else -> EstadoTrabajo.COMPLETADO to 1f
+    private fun Registro.avanzar(ahora: Long): TrabajoHpc {
+        val enEjecucion = ahora - trabajo.enviadoEn - esperaMs
+        return when {
+            cancelado -> trabajo.copy(estado = EstadoTrabajo.CANCELADO)
+            enEjecucion < 0 -> trabajo.copy(estado = EstadoTrabajo.EN_COLA, posicionCola = 1)
+            enEjecucion < duracionMs -> trabajo.copy(estado = EstadoTrabajo.EJECUTANDO, nodos = listOf("hpc-worker1", "hpc-worker2"))
+            falla -> trabajo.copy(estado = EstadoTrabajo.FALLIDO, mensajeError = "mpirun terminó con código 1")
+            else -> trabajo.copy(estado = EstadoTrabajo.COMPLETADO,
+                rutaResultado = "/Resultados HPC/${trabajo.nombre.substringBefore(' ')}-${trabajo.id.take(8)}")
         }
-        return TrabajoHpc(
-            id = id,
-            nombre = solicitud.nombre,
-            comando = solicitud.comando,
-            prioridad = solicitud.prioridad,
-            estado = estado,
-            progreso = progreso,
-            enviadoEn = enviadoEn,
-            resultado = if (estado == EstadoTrabajo.COMPLETADO) "Terminado sin errores" else null,
-            mensajeError = if (estado == EstadoTrabajo.FALLIDO) "Código de salida 1: memoria insuficiente" else null,
-            recursos = recursos,
-        )
     }
 
     private companion object {
-        const val NODOS_TOTALES = 16
+        const val PROCESOS = 16
         const val MIN = 60_000L
         const val HORA = 60 * MIN
     }

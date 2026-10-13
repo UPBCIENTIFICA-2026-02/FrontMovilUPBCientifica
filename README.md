@@ -214,7 +214,7 @@ horario) y `FileSyncRepository` (estado compartido por la UI y el segundo plano)
 | Shared File | **Conectado** (8085): Conmigo / Que comparto, compartir con usuario o grupo, cambiar nivel, dejar de compartir, recompartir si el nivel lo permite |
 | Photo Album y Streaming | **Conectado** (8083): incluye lo compartido contigo ("Compartido por …"), ordenar (Recientes, Más vistos, Título), miniaturas reales (FFmpeg), reproducción dentro de la app (ExoPlayer por rangos), borrar lo propio. Nada se abre en otra app ni en el navegador |
 | File Sync | **Conectado** (gRPC 9090): elige una carpeta del teléfono; se respalda en una carpeta de tu Home ("Respaldo celular"). Se sincroniza **sola al llegar al Wi-Fi donde responde el servidor** (aunque la app esté cerrada), en el horario elegido (cada hora o diaria) o con "Sincronizar ahora". Conflictos: se guardan ambas versiones |
-| HPC | **Conectado** a job-api (8082): enviar (nombre, comando, prioridad), listar, ver salida/error, cancelar. Sin tarjeta de carga del clúster (job-api no expone `/cluster/estado`) |
+| HPC | **Conectado** a job-api (8082), Contrato_HPC: enviar código fuente + dataset (rutas del Home), procesos, tiempo máximo, prioridad y parámetros; estado del clúster y de los nodos; registros; resultado en "Resultados HPC"; cancelar y reintentar |
 
 **Sobre el contrato de autenticación.** El backend expone `iniciarSesion` /
 `cerrarSesion`; esta app usa los alias `login` / `logout` (con `contrasena` y
@@ -246,9 +246,8 @@ contraseña incorrectos" aunque sean correctos.
 
 ## 9. Pendientes del equipo
 
-- **HPC:** cuando job-api adopte `Contrato_HPC` (código fuente + dataset +
-  procesos en vez de un comando) y exponga `/cluster/estado`, cambiar `HpcApi`,
-  el formulario de `HpcScreen` y la tarjeta del clúster.
+- **HPC:** elegir el código y el dataset con un selector de Mis archivos (hoy
+  se escribe la ruta del Home, como `/Proyectos/pi.c`).
 - **File Sync con TLS:** en el laboratorio (`Entorno.LABORATORIO`) el canal usa
   TLS; si el certificado lo firma una CA propia, hay que instalarla en el teléfono.
 - **Navegación:** se usa un `when` simple en `MainActivity`; a futuro, Navigation-Compose.

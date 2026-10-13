@@ -28,6 +28,9 @@
         -->
         <domain includeSubdomains="true">192.168.20.31</domain>
 
+        <!-- Celular conectado a la zona con cobertura (hotspot) del PC. -->
+        <domain includeSubdomains="true">192.168.137.1</domain>
+
         <!--
             VMs del laboratorio / CCA.
             TODO equipo: añadir el resto a medida que se desplieguen
